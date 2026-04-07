@@ -34,6 +34,7 @@ import {
   Flower2,
   Trash2,
   Zap,
+  Menu,
 } from 'lucide-react';
 
 import {
@@ -477,6 +478,7 @@ export default function AdminApp() {
     automations: false,
   });
 
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedClient, setSelectedClient] = useState<Record<string, unknown> | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showNewProf, setShowNewProf] = useState(false);
@@ -921,7 +923,8 @@ export default function AdminApp() {
 
   return (
     <div className="admin-layout">
-      <aside className="admin-sidebar" style={{ width: 260 }}>
+      <div className={`admin-sidebar-overlay${sidebarOpen ? ' admin-sidebar-overlay-visible' : ''}`} onClick={() => setSidebarOpen(false)} />
+      <aside className={`admin-sidebar${sidebarOpen ? ' admin-sidebar-open' : ''}`} style={{ width: 260 }}>
         <div className="admin-sidebar-brand">
           <div className="admin-brand-icon">
             <Stethoscope style={{ width: 22, height: 22, color: 'var(--admin-gold, #d4af37)' }} />
@@ -939,7 +942,7 @@ export default function AdminApp() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
                 className={`admin-nav-item${active ? ' active' : ''}`}
               >
                 <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
@@ -972,9 +975,14 @@ export default function AdminApp() {
 
       <div className="admin-main">
         <div className="admin-topbar">
-          <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button className="admin-hamburger" onClick={() => setSidebarOpen(true)}>
+              <Menu style={{ width: 24, height: 24 }} />
+            </button>
+            <div>
             <h1 style={{ fontSize: 19, fontWeight: 700, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>{navItems.find((item) => item.id === activeTab)?.label}</h1>
             <p style={{ fontSize: 12, color: 'var(--admin-text-muted)', margin: '2px 0 0' }}>Estúdio Renovo — Gestão Premium</p>
+          </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <select
@@ -1027,7 +1035,7 @@ export default function AdminApp() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
                 <div className="admin-analytics-card">
                   <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>Financeiro do dia ({formatDateBR(dateFilter)})</h3>
-                  <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+                  <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 12 }}>
                     <div><p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Previsto</p><p style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', marginTop: 2 }}>R$ {overview.finance.expected.toFixed(2)}</p></div>
                     <div><p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Recebido</p><p style={{ fontSize: 16, fontWeight: 700, color: '#059669', marginTop: 2 }}>R$ {overview.finance.received.toFixed(2)}</p></div>
                     <div><p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Pendente</p><p style={{ fontSize: 16, fontWeight: 700, color: '#d97706', marginTop: 2 }}>R$ {overview.finance.pending.toFixed(2)}</p></div>
@@ -1119,12 +1127,12 @@ export default function AdminApp() {
                       <input type="time" className="admin-input-sm" style={{ fontSize: 10, padding: '2px 6px', width: 80 }} value={schedule.time} onChange={(e) => setRescheduleMap((c) => ({ ...c, [booking.id]: { ...schedule, time: e.target.value } }))} />
                     </div>
                   )}
-                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleRescheduleBooking(booking)} className="admin-btn-outline" style={{ fontSize: 10, padding: '3px 8px' }}>Remarcar</button>}
-                    {booking.status !== 'confirmed' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleConfirmBooking(booking)} className="admin-btn-success" style={{ fontSize: 10, padding: '3px 8px' }}><CheckCircle2 style={{ width: 11, height: 11 }} /> Confirmar</button>}
-                    {(booking.status === 'confirmed' || isOverdue(booking)) && <button disabled={busy} onClick={() => void handleCompleteBooking(booking)} className="admin-btn-primary" style={{ fontSize: 10, padding: '3px 8px' }}><Sparkles style={{ width: 11, height: 11 }} /> Finalizar</button>}
-                    {booking.status !== 'rejected' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleRejectBooking(booking)} className="admin-btn-danger" style={{ fontSize: 10, padding: '3px 8px' }}><XCircle style={{ width: 11, height: 11 }} /> Rejeitar</button>}
-                    <button disabled={busy} onClick={() => void handleDeleteBooking(booking)} className="admin-btn-outline" style={{ fontSize: 10, padding: '3px 8px', color: '#dc2626', borderColor: '#dc2626' }}><Trash2 style={{ width: 11, height: 11 }} /> Excluir</button>
+                  <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleRescheduleBooking(booking)} className="admin-btn-outline" style={{ fontSize: 11, padding: '6px 10px' }}>Remarcar</button>}
+                    {booking.status !== 'confirmed' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleConfirmBooking(booking)} className="admin-btn-success" style={{ fontSize: 11, padding: '6px 10px' }}><CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar</button>}
+                    {(booking.status === 'confirmed' || isOverdue(booking)) && <button disabled={busy} onClick={() => void handleCompleteBooking(booking)} className="admin-btn-primary" style={{ fontSize: 11, padding: '6px 10px' }}><Sparkles style={{ width: 12, height: 12 }} /> Finalizar</button>}
+                    {booking.status !== 'rejected' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void handleRejectBooking(booking)} className="admin-btn-danger" style={{ fontSize: 11, padding: '6px 10px' }}><XCircle style={{ width: 12, height: 12 }} /> Rejeitar</button>}
+                    <button disabled={busy} onClick={() => void handleDeleteBooking(booking)} className="admin-btn-outline" style={{ fontSize: 11, padding: '6px 10px', color: '#dc2626', borderColor: '#dc2626' }}><Trash2 style={{ width: 12, height: 12 }} /> Excluir</button>
                   </div>
                 </div>
               );

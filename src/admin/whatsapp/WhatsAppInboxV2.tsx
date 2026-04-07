@@ -25,7 +25,7 @@ export default function WhatsAppInboxV2({ adminKey, tenantSlug }: Props) {
 
   return (
     <div className="wa2-root">
-      <div className="wa2-layout">
+      <div className={`wa2-layout${inbox.selectedContact ? ' wa2-chat-active' : ''}`}>
         {/* Sidebar */}
         <WASidebar
           status={inbox.status}
