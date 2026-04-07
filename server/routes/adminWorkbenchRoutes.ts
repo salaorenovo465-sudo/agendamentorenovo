@@ -261,6 +261,20 @@ adminWorkbenchRoutes.get('/clients/by-phone/:phone', async (req, res) => {
   }
 });
 
+adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
+  const date = typeof req.body?.date === 'string' && DATE_REGEX.test(req.body.date) ? req.body.date : undefined;
+  try {
+    const deleted = await workbenchStore.resetFinance(date);
+    return res.json({ message: `${deleted} entradas financeiras removidas.`, deleted });
+  } catch (error) {
+    console.error('Erro ao zerar financeiro:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao zerar financeiro.' });
+  }
+});
+
 adminWorkbenchRoutes.post('/finance/confirm-booking-payment', async (req, res) => {
   const bookingId = typeof req.body?.booking_id === 'number' ? req.body.booking_id : null;
   const paymentMethod = typeof req.body?.payment_method === 'string' ? req.body.payment_method.trim() : null;

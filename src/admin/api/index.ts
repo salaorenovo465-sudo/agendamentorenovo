@@ -51,6 +51,7 @@ export {
   createWorkbenchEntityForAdmin,
   updateWorkbenchEntityForAdmin,
   deleteWorkbenchEntityForAdmin,
+  resetFinanceForAdmin,
   convertLeadForAdmin,
   markFinancePaidForAdmin,
   findClientByPhoneForAdmin,

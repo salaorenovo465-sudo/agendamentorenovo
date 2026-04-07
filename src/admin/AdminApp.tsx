@@ -37,6 +37,7 @@ import {
   rejectAdminBooking,
   rescheduleAdminBooking,
   saveAdminSettings,
+  resetFinanceForAdmin,
   updateAdminTenant,
   updateWorkbenchEntityForAdmin,
 } from './api';
@@ -442,6 +443,18 @@ export default function AdminApp() {
     }
   };
 
+  const handleResetFinance = async (password: string, date?: string): Promise<boolean> => {
+    if (!adminKey || password !== adminKey) return false;
+    try {
+      await resetFinanceForAdmin(adminKey, date);
+      toast.success('Financeiro zerado com sucesso!');
+      void loadOverview();
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const handleSaveSettings = async () => {
     if (!adminKey) return;
     setSavingSettings(true);
@@ -640,6 +653,7 @@ export default function AdminApp() {
               overviewLoading={overviewLoading}
               dateFilter={dateFilter}
               stageSummary={stageSummary}
+              onResetFinance={handleResetFinance}
             />
           )}
 

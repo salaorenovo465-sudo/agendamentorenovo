@@ -421,6 +421,19 @@ class WorkbenchStore {
     return (data?.value_json as Record<string, unknown>) || {};
   }
 
+  async resetFinance(date?: string): Promise<number> {
+    const supabase = this.getSupabase();
+    let query = supabase.from('financial_entries').delete();
+    if (date) {
+      query = query.eq('due_date', date);
+    } else {
+      query = query.gte('id', 0);
+    }
+    const { data, error } = await query.select('id');
+    if (error) throw error;
+    return (data || []).length;
+  }
+
   async getOverview(date: string): Promise<OverviewData> {
     const supabase = this.getSupabase();
     const bookings = await bookingStore.listByDate(date);

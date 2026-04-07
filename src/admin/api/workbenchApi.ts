@@ -52,6 +52,12 @@ export const deleteWorkbenchEntityForAdmin = async (entity: WorkbenchEntity, id:
   });
 };
 
+export const resetFinanceForAdmin = async (adminKey: string, date?: string): Promise<{ deleted: number }> =>
+  requestAdmin<{ deleted: number }>('/api/admin/workbench/finance/reset', adminKey, {
+    method: 'POST',
+    body: JSON.stringify(date ? { date } : {}),
+  });
+
 export const convertLeadForAdmin = async (
   leadId: number,
   adminKey: string,
