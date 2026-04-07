@@ -1,7 +1,7 @@
-// Re-export everything from the workbench modules so existing imports remain valid.
-export type { WorkbenchEntity, OverviewData, TenantRecord, TenantRegistryValue } from './workbench/index';
+export type { WorkbenchEntity, OverviewData, TenantRecord, TenantRegistryValue } from './workbenchTypes';
+export { ENTITY_CONFIG } from './workbenchTypes';
+
 export {
-  ENTITY_CONFIG,
   TENANT_REGISTRY_KEY,
   LEGACY_SETTINGS_KEY,
   TENANT_SETTINGS_PREFIX,
@@ -14,5 +14,6 @@ export {
   mapTenantRegistry,
   toTenantRegistryValue,
   settingsKeyForTenant,
-  workbenchStore,
-} from './workbench/index';
+} from './workbenchHelpers';
+
+export { workbenchStore } from './WorkbenchStore';

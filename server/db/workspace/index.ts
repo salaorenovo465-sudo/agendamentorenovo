@@ -1,6 +1,3 @@
-// Re-export everything from the modularized workspace folder
-// so existing imports from '../db/whatsappWorkspaceStore' keep working.
-
 export type {
   ConversationOperationalStatus,
   ConversationMeta,
@@ -9,7 +6,7 @@ export type {
   WhatsappSyncState,
   WhatsappContactMap,
   WhatsappConversationMap,
-} from './workspace/index';
+} from './workspaceTypes';
 
 export {
   toIsoString,
@@ -27,5 +24,6 @@ export {
   mapSupabaseContactMap,
   mapSqliteConversationMap,
   mapSupabaseConversationMap,
-  whatsappWorkspaceStore,
-} from './workspace/index';
+} from './workspaceMappers';
+
+export { whatsappWorkspaceStore } from './WhatsappWorkspaceStore';

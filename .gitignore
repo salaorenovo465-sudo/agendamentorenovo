@@ -11,3 +11,5 @@ database.sqlite-*
 service-account-key.json
 .env*
 !.env.example
+
+.vercel
