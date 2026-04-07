@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, CheckCircle, XCircle, Clock, AlertTriangle, Copy, Check } from 'lucide-react';
 
@@ -191,6 +191,9 @@ export function getDayOccupancy(bookings: { status: string }[]): number {
 /* ═══ 12. REJECT MODAL ═══ */
 export function RejectModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; onClose: () => void; onConfirm: (reason: string) => void }) {
   const [reason, setReason] = useState('');
+  const prevOpen = useRef(false);
+  if (isOpen && !prevOpen.current) setReason('');
+  prevOpen.current = isOpen;
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">

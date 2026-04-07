@@ -51,6 +51,7 @@ const mapSqliteBooking = (row: Record<string, unknown>): BookingRecord => ({
   googleEventId: row.google_event_id ? String(row.google_event_id) : null,
   whatsappThreadId: row.whatsapp_thread_id ? Number(row.whatsapp_thread_id) : null,
   rejectionReason: row.rejection_reason ? String(row.rejection_reason) : null,
+  paymentStatus: row.payment_status ? String(row.payment_status) : null,
   createdAt: toIsoString(row.created_at),
   updatedAt: row.updated_at ? toIsoString(row.updated_at) : toIsoString(row.created_at),
   confirmedAt: row.confirmed_at ? toIsoString(row.confirmed_at) : null,
@@ -69,6 +70,7 @@ const mapSupabaseBooking = (row: Record<string, unknown>): BookingRecord => ({
   googleEventId: row.google_event_id ? String(row.google_event_id) : null,
   whatsappThreadId: row.whatsapp_thread_id ? Number(row.whatsapp_thread_id) : null,
   rejectionReason: row.rejection_reason ? String(row.rejection_reason) : null,
+  paymentStatus: row.payment_status ? String(row.payment_status) : null,
   createdAt: toIsoString(row.created_at),
   updatedAt: toIsoString(row.updated_at),
   confirmedAt: row.confirmed_at ? toIsoString(row.confirmed_at) : null,
@@ -462,6 +464,11 @@ class BookingStore {
   }
 
   async updateSchedule(input: UpdateBookingScheduleInput): Promise<BookingRecord | null> {
+    const conflict = await this.hasConflict(input.date, input.time, input.id);
+    if (conflict) {
+      throw new Error('Horario ja reservado.');
+    }
+
     const now = new Date().toISOString();
 
     if (this.supabaseEnabled && this.supabase) {

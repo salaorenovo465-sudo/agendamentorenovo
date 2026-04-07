@@ -55,33 +55,6 @@ const isPermissionError = (error: unknown): boolean => {
   return /writer access|insufficient permission|forbidden|does not have permission/i.test(rawMessage);
 };
 
-const enrichConversation = async (conversation: Awaited<ReturnType<typeof inboxStore.listThreads>>[number]) => {
-  let linkedBookings: Awaited<ReturnType<typeof bookingStore.listByWhatsappThread>> = [];
-  let avatarUrl: string | null = null;
-
-  try {
-    linkedBookings = await bookingStore.listByWhatsappThread(conversation.id);
-  } catch (error) {
-    console.error(`enrichConversation: falha ao buscar bookings do thread ${conversation.id}:`, error);
-  }
-
-  try {
-    avatarUrl = await getWhatsappContactAvatarUrl(conversation.phone);
-  } catch (error) {
-    console.error(`enrichConversation: falha ao buscar avatar de ${conversation.phone}:`, error);
-  }
-
-  const pendingBookingsCount = linkedBookings.filter((booking) => booking.status === 'pending').length;
-  const latestBookingStatus = linkedBookings[0]?.status || null;
-
-  return {
-    ...conversation,
-    pendingBookingsCount,
-    latestBookingStatus,
-    avatarUrl,
-  };
-};
-
 export const adminRoutes = Router();
 
 adminRoutes.get('/inbox/stream', (req, res) => {
@@ -175,7 +148,7 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
     });
 
     if (updatedBooking) {
-      await notifyCustomerConfirmedBooking(updatedBooking);
+      try { await notifyCustomerConfirmedBooking(updatedBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (confirmacao):', notifErr); }
 
       if (workbenchStore.isEnabled()) {
         try {
@@ -218,7 +191,7 @@ adminRoutes.post('/bookings/:id/complete', async (req, res) => {
 
     const updatedBooking = await bookingStore.updateStatus({
       id: booking.id,
-      status: 'completed' as any,
+      status: 'completed',
     });
 
     return res.json({ message: 'Serviço finalizado com sucesso.', booking: updatedBooking });
@@ -283,7 +256,7 @@ adminRoutes.post('/bookings/:id/reject', async (req, res) => {
     });
 
     if (updatedBooking) {
-      await notifyCustomerRejectedBooking(updatedBooking);
+      try { await notifyCustomerRejectedBooking(updatedBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (rejeicao):', notifErr); }
     }
 
     return res.json({ message: 'Agendamento rejeitado.', booking: updatedBooking });
@@ -379,7 +352,7 @@ adminRoutes.post('/bookings/:id/reschedule', async (req, res) => {
         : updatedSchedule;
 
     if (finalBooking) {
-      await notifyCustomerRescheduledBooking(finalBooking);
+      try { await notifyCustomerRescheduledBooking(finalBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (remarcacao):', notifErr); }
     }
 
     return res.json({ message: 'Agendamento remarcado com sucesso.', booking: finalBooking });

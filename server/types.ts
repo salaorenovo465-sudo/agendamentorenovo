@@ -1,4 +1,4 @@
-export type BookingStatus = 'pending' | 'confirmed' | 'rejected';
+export type BookingStatus = 'pending' | 'confirmed' | 'rejected' | 'completed';
 
 export type BookingRecord = {
   id: number;
@@ -12,6 +12,7 @@ export type BookingRecord = {
   googleEventId: string | null;
   whatsappThreadId: number | null;
   rejectionReason: string | null;
+  paymentStatus: string | null;
   createdAt: string;
   updatedAt: string;
   confirmedAt: string | null;

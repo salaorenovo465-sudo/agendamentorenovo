@@ -479,7 +479,6 @@ export default function AdminApp() {
 
   const [selectedClient, setSelectedClient] = useState<Record<string, unknown> | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
-  const [newTaskForm, setNewTaskForm] = useState<Record<string, unknown>>({});
   const [showNewProf, setShowNewProf] = useState(false);
   const [selectedProf, setSelectedProf] = useState<Record<string, unknown> | null>(null);
   const [editingProf, setEditingProf] = useState<Record<string, unknown>>({});
@@ -1369,7 +1368,7 @@ export default function AdminApp() {
                         fields={ENTITY_FIELDS.tasks}
                         rows={[]}
                         loading={false}
-                        onCreate={async (payload) => { await handleCreateEntity('tasks', { ...payload, status: payload.status || 'pendente' }); setShowNewTask(false); setNewTaskForm({}); }}
+                        onCreate={async (payload) => { await handleCreateEntity('tasks', { ...payload, status: payload.status || 'pendente' }); setShowNewTask(false); }}
                         onUpdate={async () => {}}
                         onDelete={async () => {}}
                       />

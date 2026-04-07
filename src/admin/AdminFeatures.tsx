@@ -263,8 +263,9 @@ export function StatusPieChart({ bookings }: { bookings: AdminBooking[] }) {
     const p = bookings.filter(b => b.status === 'pending').length;
     const c = bookings.filter(b => b.status === 'confirmed').length;
     const r = bookings.filter(b => b.status === 'rejected').length;
-    const total = p + c + r || 1;
-    return { p, c, r, total, pPct: (p / total) * 100, cPct: (c / total) * 100, rPct: (r / total) * 100 };
+    const d = bookings.filter(b => b.status === 'completed').length;
+    const total = p + c + r + d || 1;
+    return { p, c, r, d, total, pPct: (p / total) * 100, cPct: (c / total) * 100, rPct: (r / total) * 100, dPct: (d / total) * 100 };
   }, [bookings]);
 
   const radius = 40, cx = 50, cy = 50, stroke = 10;
@@ -272,6 +273,7 @@ export function StatusPieChart({ bookings }: { bookings: AdminBooking[] }) {
   const pLen = (data.pPct / 100) * circ;
   const cLen = (data.cPct / 100) * circ;
   const rLen = (data.rPct / 100) * circ;
+  const dLen = (data.dPct / 100) * circ;
 
   return (
     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="admin-analytics-card">
@@ -285,6 +287,7 @@ export function StatusPieChart({ bookings }: { bookings: AdminBooking[] }) {
           <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#f59e0b" strokeWidth={stroke} strokeDasharray={`${pLen} ${circ - pLen}`} strokeDashoffset={0} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} />
           <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#10b981" strokeWidth={stroke} strokeDasharray={`${cLen} ${circ - cLen}`} strokeDashoffset={-pLen} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} />
           <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#f43f5e" strokeWidth={stroke} strokeDasharray={`${rLen} ${circ - rLen}`} strokeDashoffset={-(pLen + cLen)} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} />
+          <circle cx={cx} cy={cy} r={radius} fill="none" stroke="#6366f1" strokeWidth={stroke} strokeDasharray={`${dLen} ${circ - dLen}`} strokeDashoffset={-(pLen + cLen + rLen)} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} />
           <text x={cx} y={cy - 4} textAnchor="middle" className="text-2xl font-bold" fill="var(--admin-text)" fontSize="18">{data.total}</text>
           <text x={cx} y={cy + 12} textAnchor="middle" fill="var(--admin-text-muted)" fontSize="8">total</text>
         </svg>
@@ -293,6 +296,7 @@ export function StatusPieChart({ bookings }: { bookings: AdminBooking[] }) {
             { label: 'Pendentes', val: data.p, pct: data.pPct, color: '#f59e0b' },
             { label: 'Confirmados', val: data.c, pct: data.cPct, color: '#10b981' },
             { label: 'Rejeitados', val: data.r, pct: data.rPct, color: '#f43f5e' },
+            { label: 'Finalizados', val: data.d, pct: data.dPct, color: '#6366f1' },
           ].map(item => (
             <div key={item.label} className="flex items-center gap-2 text-xs">
               <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: item.color }} />

@@ -235,8 +235,12 @@ export const handleClientCancellationRequest = async (phone: string, text: strin
 
     if (activeBookings.length === 0) return false;
 
-    // Cancel the most recent active booking
-    const bookingToCancel = activeBookings[0];
+    // Cancel the next upcoming active booking (closest future date/time)
+    const now = new Date().toISOString().slice(0, 10);
+    const upcoming = activeBookings
+      .filter((b) => b.date >= now)
+      .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+    const bookingToCancel = upcoming[0] || activeBookings[0];
     await bookingStore.updateStatus({
       id: bookingToCancel.id,
       status: 'rejected',
