@@ -5,9 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Estúdio Renovo Agenda</title>
     <link rel="icon" type="image/jpeg" href="/logo.jpg" />
+    <link rel="dns-prefetch" href="https://agendamentorenovo-api.onrender.com" />
+    <link rel="preconnect" href="https://agendamentorenovo-api.onrender.com" crossorigin />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div style="display:flex;align-items:center;justify-content:center;height:100vh;background:#0f0a0c;flex-direction:column;gap:16px">
+        <div style="width:40px;height:40px;border:3px solid rgba(212,175,55,0.2);border-top-color:#d4af37;border-radius:50%;animation:sp .7s linear infinite"></div>
+        <p style="color:rgba(212,175,55,0.6);font-family:sans-serif;font-size:13px">Carregando...</p>
+      </div>
+      <style>@keyframes sp{to{transform:rotate(360deg)}}</style>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

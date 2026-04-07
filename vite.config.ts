@@ -15,6 +15,16 @@ export default defineConfig(({mode}) => {
         '@': path.resolve(__dirname, '.'),
       },
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-motion': ['framer-motion', 'motion'],
+          },
+        },
+      },
+    },
     server: {
       allowedHosts: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
