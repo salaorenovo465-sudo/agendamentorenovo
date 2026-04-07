@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import './admin.css';
 import {
   BarChart3,
   Bell,
