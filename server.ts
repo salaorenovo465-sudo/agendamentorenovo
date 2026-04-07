@@ -82,4 +82,19 @@ void initializeWhatsapp().catch((error) => {
 
 app.listen(port, () => {
   console.log(`Servidor backend rodando na porta ${port}`);
+
+  // Self-ping a cada 14 minutos para evitar que o Render free tier durma
+  const KEEP_ALIVE_INTERVAL = 14 * 60 * 1000;
+  const renderUrl = process.env.RENDER_EXTERNAL_URL;
+  if (renderUrl) {
+    setInterval(async () => {
+      try {
+        const res = await fetch(`${renderUrl}/health`);
+        console.log(`[keep-alive] ping ${res.status}`);
+      } catch (err) {
+        console.warn('[keep-alive] falha no ping:', err);
+      }
+    }, KEEP_ALIVE_INTERVAL);
+    console.log('[keep-alive] ativado — ping a cada 14 min');
+  }
 });
