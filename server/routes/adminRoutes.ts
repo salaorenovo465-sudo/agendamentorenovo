@@ -573,10 +573,10 @@ adminRoutes.post('/whatsapp/connect', whatsappControlRateLimit, async (_req, res
 
 adminRoutes.post('/whatsapp/disconnect', whatsappControlRateLimit, async (_req, res) => {
   try {
-    await disconnectWhatsapp();
-    // Also logout from Evolution API if configured, so session is fully cleared
+    // Full logout to clear session and allow connecting a different number
+    await logoutWhatsapp();
     try { await logoutEvolutionInstance(); } catch { /* ignore if not configured */ }
-    return res.json({ message: 'WhatsApp desconectado.', status: getWhatsappStatus() });
+    return res.json({ message: 'WhatsApp desconectado. Sessão encerrada.', status: getWhatsappStatus() });
   } catch (error) {
     console.error('Erro ao desconectar WhatsApp:', error);
     return res.status(500).json({ error: 'Erro ao desconectar WhatsApp.' });
