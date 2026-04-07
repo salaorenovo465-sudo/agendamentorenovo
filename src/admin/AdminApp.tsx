@@ -1358,35 +1358,21 @@ export default function AdminApp() {
                   <button onClick={() => setShowNewTask(true)} className="admin-btn-primary" style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}><Plus style={{ width: 14, height: 14 }} /> Nova Tarefa</button>
                 </div>
                 {showNewTask && (
-                  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={(e) => { if (e.target === e.currentTarget) setShowNewTask(false); }}>
-                    <div style={{ background: 'var(--admin-card)', borderRadius: 16, width: '100%', maxWidth: 480, maxHeight: '85vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.5)', border: '1.5px solid var(--admin-border)' }}>
-                      <div style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--admin-border)' }}>
-                        <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0 }}>Nova Tarefa</h3>
-                        <button onClick={() => setShowNewTask(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}><X style={{ width: 20, height: 20, color: 'var(--admin-text-muted)' }} /></button>
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowNewTask(false)}>
+                    <div style={{ background: 'var(--admin-surface)', border: '1px solid var(--admin-border)', borderRadius: 'var(--admin-radius-md)', padding: 24, width: '100%', maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', margin: 0 }}>Nova Tarefa</h3>
+                        <button onClick={() => setShowNewTask(false)} className="admin-btn-outline" style={{ padding: 4 }}><X style={{ width: 16, height: 16 }} /></button>
                       </div>
-                      <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
-                        {ENTITY_FIELDS.tasks.map((f) => (
-                          <div key={f.key}>
-                            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--admin-text-muted)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                              {f.label}{f.required ? ' *' : ''}
-                            </label>
-                            <FormField field={f} value={newTaskForm[f.key] ?? ''} onChange={(v) => setNewTaskForm((prev) => ({ ...prev, [f.key]: v }))} />
-                          </div>
-                        ))}
-                        <div style={{ display: 'flex', gap: 10, marginTop: 8, justifyContent: 'flex-end' }}>
-                          <button onClick={() => { setShowNewTask(false); setNewTaskForm({}); }} className="admin-btn-outline" style={{ padding: '10px 20px', fontSize: 13 }}>Cancelar</button>
-                          <button
-                            onClick={async () => {
-                              if (!newTaskForm.title) return;
-                              await handleCreateEntity('tasks', { ...newTaskForm, status: newTaskForm.status || 'pendente' });
-                              setShowNewTask(false);
-                              setNewTaskForm({});
-                            }}
-                            className="admin-btn-primary"
-                            style={{ padding: '10px 24px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}
-                          ><Save style={{ width: 14, height: 14 }} /> Criar Tarefa</button>
-                        </div>
-                      </div>
+                      <CrudTab
+                        title="Tarefa"
+                        fields={ENTITY_FIELDS.tasks}
+                        rows={[]}
+                        loading={false}
+                        onCreate={async (payload) => { await handleCreateEntity('tasks', { ...payload, status: payload.status || 'pendente' }); setShowNewTask(false); setNewTaskForm({}); }}
+                        onUpdate={async () => {}}
+                        onDelete={async () => {}}
+                      />
                     </div>
                   </div>
                 )}
