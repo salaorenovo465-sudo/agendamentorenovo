@@ -26,10 +26,8 @@ const DEFAULT_BAILEYS_AUTH_DIR = path.resolve(os.homedir(), '.agendamentorenovo'
 const BAILEYS_AUTH_DIR = process.env.BAILEYS_AUTH_DIR || DEFAULT_BAILEYS_AUTH_DIR;
 const BAILEYS_AUTO_CONNECT = process.env.BAILEYS_AUTO_CONNECT !== 'false';
 
-const BAILEYS_SALON_WHATSAPP = (process.env.BAILEYS_SALON_WHATSAPP || '')
-  .split(',')
-  .map((value) => normalizeWhatsappPhone(value))
-  .filter(Boolean);
+const MASTER_SALON_WHATSAPP = normalizeWhatsappPhone('5571999542265');
+const BAILEYS_SALON_WHATSAPP = MASTER_SALON_WHATSAPP ? [MASTER_SALON_WHATSAPP] : [];
 
 type WhatsappConnectionState = 'disabled' | 'disconnected' | 'connecting' | 'qr' | 'connected';
 
