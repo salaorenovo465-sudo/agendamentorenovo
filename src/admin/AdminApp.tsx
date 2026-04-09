@@ -78,6 +78,9 @@ export default function AdminApp() {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
   const [whatsAppUnlocked, setWhatsAppUnlocked] = useState(false);
+  const [whatsAppLockModalOpen, setWhatsAppLockModalOpen] = useState(false);
+  const [whatsAppMasterInput, setWhatsAppMasterInput] = useState('');
+  const [whatsAppMasterError, setWhatsAppMasterError] = useState('');
 
   const [dateFilter, setDateFilter] = useState(getTodayDate());
   const [dateFilterEnd, setDateFilterEnd] = useState(getTodayDate());
@@ -319,6 +322,9 @@ export default function AdminApp() {
     setEntityRows(INITIAL_ENTITY_ROWS);
     setBookings([]);
     setWhatsAppUnlocked(false);
+    setWhatsAppLockModalOpen(false);
+    setWhatsAppMasterInput('');
+    setWhatsAppMasterError('');
   };
 
   const handleOpenTab = (tabId: TabId) => {
@@ -334,19 +340,23 @@ export default function AdminApp() {
       return;
     }
 
-    const password = window.prompt('Area protegida: informe a senha master para abrir o WhatsApp.');
-    if (password === null) {
-      return;
-    }
+    setWhatsAppMasterInput('');
+    setWhatsAppMasterError('');
+    setWhatsAppLockModalOpen(true);
+    setSidebarOpen(false);
+  };
 
-    if (password.trim() !== WHATSAPP_MASTER_PASSWORD) {
-      toast.error('Senha master invalida para abrir o WhatsApp.');
+  const handleUnlockWhatsApp = () => {
+    if (whatsAppMasterInput.trim() !== WHATSAPP_MASTER_PASSWORD) {
+      setWhatsAppMasterError('Senha master invalida.');
       return;
     }
 
     setWhatsAppUnlocked(true);
-    setActiveTab(tabId);
-    setSidebarOpen(false);
+    setWhatsAppLockModalOpen(false);
+    setWhatsAppMasterInput('');
+    setWhatsAppMasterError('');
+    setActiveTab('whatsapp');
     toast.success('WhatsApp desbloqueado.');
   };
 
@@ -819,6 +829,50 @@ export default function AdminApp() {
         onClose={() => setRejectModal({ open: false, booking: null })}
         onConfirm={(reason) => void handleConfirmReject(reason)}
       />
+      {whatsAppLockModalOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16 }}>
+          <div className="admin-card" style={{ width: '100%', maxWidth: 420, padding: 20, borderRadius: 'var(--admin-radius-lg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 999, background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.28)', display: 'grid', placeItems: 'center' }}>
+                <Lock style={{ width: 16, height: 16, color: 'var(--admin-gold, #d4af37)' }} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--admin-accent)' }}>WhatsApp protegido</h3>
+            </div>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--admin-text-muted)' }}>Informe a senha master para liberar esta area.</p>
+            <label className="admin-label">Senha master</label>
+            <input
+              type="password"
+              value={whatsAppMasterInput}
+              onChange={(event) => {
+                setWhatsAppMasterInput(event.target.value);
+                if (whatsAppMasterError) setWhatsAppMasterError('');
+              }}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  handleUnlockWhatsApp();
+                }
+              }}
+              className="admin-input"
+              placeholder="Digite a senha master"
+              autoFocus
+            />
+            {whatsAppMasterError && <p style={{ margin: '8px 0 0', color: '#fb7185', fontSize: 12.5, fontWeight: 600 }}>{whatsAppMasterError}</p>}
+            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button
+                className="admin-btn-outline"
+                onClick={() => {
+                  setWhatsAppLockModalOpen(false);
+                  setWhatsAppMasterInput('');
+                  setWhatsAppMasterError('');
+                }}
+              >
+                Cancelar
+              </button>
+              <button className="admin-btn-primary" onClick={handleUnlockWhatsApp}>Desbloquear</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
