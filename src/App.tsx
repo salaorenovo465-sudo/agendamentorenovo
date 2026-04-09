@@ -20,7 +20,7 @@ const fetchBookedSlotsForDate = async (dateStr: string): Promise<string[]> => {
   }
 };
 
-const WHATSAPP_NUMBER = "557183006283"; // Empresa Estúdio Renovo
+const WHATSAPP_NUMBER = "5571999542265"; // Empresa Estúdio Renovo
 
 const allServicesFlat = services.flatMap(c => c.items);
 
