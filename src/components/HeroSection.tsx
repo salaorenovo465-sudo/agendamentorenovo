@@ -108,7 +108,7 @@ export default function HeroSection({ whatsappNumber, onOpenBooking }: HeroSecti
           transition={{ delay: 1.8, duration: 1 }}
           className="flex items-center gap-4 mt-16 text-luxury-gold/30"
         >
-          <a href="https://www.instagram.com/estudiorenovo" target="_blank" rel="noopener noreferrer" className="hover:text-luxury-gold/80 transition-colors duration-300">
+          <a href="https://www.instagram.com/estudio_renovo?igsh=MTUyNGU4dnF1OXVoMA==" target="_blank" rel="noopener noreferrer" className="hover:text-luxury-gold/80 transition-colors duration-300">
             <Instagram className="w-4 h-4" />
           </a>
           <div className="dot-separator"></div>
