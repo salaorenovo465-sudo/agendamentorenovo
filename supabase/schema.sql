@@ -6,7 +6,7 @@ create table if not exists public.bookings (
   time text not null,
   name text not null,
   phone text not null,
-  status text not null default 'pending' check (status in ('pending', 'confirmed', 'rejected')),
+  status text not null default 'pending' check (status in ('pending', 'confirmed', 'rejected', 'completed')),
   google_event_id text,
   whatsapp_thread_id bigint,
   rejection_reason text,

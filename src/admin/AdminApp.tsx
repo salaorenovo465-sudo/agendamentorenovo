@@ -8,6 +8,7 @@ import {
   CreditCard,
   FileCheck,
   LayoutDashboard,
+  Lock,
   LogOut,
   Menu,
   MessageSquare,
@@ -71,10 +72,12 @@ import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 
 export default function AdminApp() {
+  const WHATSAPP_MASTER_PASSWORD = '75487319@@';
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [adminKeyInput, setAdminKeyInput] = useState('');
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState<TabId>('dashboard');
+  const [whatsAppUnlocked, setWhatsAppUnlocked] = useState(false);
 
   const [dateFilter, setDateFilter] = useState(getTodayDate());
   const [dateFilterEnd, setDateFilterEnd] = useState(getTodayDate());
@@ -315,6 +318,36 @@ export default function AdminApp() {
     setSettings({});
     setEntityRows(INITIAL_ENTITY_ROWS);
     setBookings([]);
+    setWhatsAppUnlocked(false);
+  };
+
+  const handleOpenTab = (tabId: TabId) => {
+    if (tabId !== 'whatsapp') {
+      setActiveTab(tabId);
+      setSidebarOpen(false);
+      return;
+    }
+
+    if (whatsAppUnlocked) {
+      setActiveTab(tabId);
+      setSidebarOpen(false);
+      return;
+    }
+
+    const password = window.prompt('Area protegida: informe a senha master para abrir o WhatsApp.');
+    if (password === null) {
+      return;
+    }
+
+    if (password.trim() !== WHATSAPP_MASTER_PASSWORD) {
+      toast.error('Senha master invalida para abrir o WhatsApp.');
+      return;
+    }
+
+    setWhatsAppUnlocked(true);
+    setActiveTab(tabId);
+    setSidebarOpen(false);
+    toast.success('WhatsApp desbloqueado.');
   };
 
   const withAgendaRefresh = async (callback: () => Promise<void>) => {
@@ -576,11 +609,14 @@ export default function AdminApp() {
             return (
               <button
                 key={item.id}
-                onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
+                onClick={() => { handleOpenTab(item.id); }}
                 className={`admin-nav-item${active ? ' active' : ''}`}
               >
                 <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
-                <span style={{ fontSize: 14.5, fontWeight: active ? 700 : 500, letterSpacing: '0.01em' }}>{item.label}</span>
+                <span style={{ fontSize: 14.5, fontWeight: active ? 700 : 500, letterSpacing: '0.01em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {item.label}
+                  {item.id === 'whatsapp' && !whatsAppUnlocked && <Lock style={{ width: 13, height: 13 }} />}
+                </span>
               </button>
             );
           })}
