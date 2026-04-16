@@ -74,6 +74,10 @@ class WorkbenchStore {
       sanitized.amount = Number(sanitized.amount || 0);
     }
 
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'base_commission')) {
+      sanitized.base_commission = Number(sanitized.base_commission || 0);
+    }
+
     if (Object.prototype.hasOwnProperty.call(sanitized, 'score')) {
       sanitized.score = Math.max(1, Math.min(5, Number(sanitized.score || 1)));
     }
@@ -88,6 +92,10 @@ class WorkbenchStore {
 
     if (Object.prototype.hasOwnProperty.call(sanitized, 'active')) {
       sanitized.active = Boolean(sanitized.active);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'commission_profile') && !Array.isArray(sanitized.commission_profile)) {
+      sanitized.commission_profile = [];
     }
 
     return sanitized;

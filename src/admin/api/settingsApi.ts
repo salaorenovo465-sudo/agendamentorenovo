@@ -23,6 +23,36 @@ export const saveAdminSettings = async (settings: AdminSettings, adminKey: strin
   return response.settings;
 };
 
+export const verifyMasterPasswordForAdmin = async (password: string, adminKey: string, tenantSlug?: string): Promise<boolean> => {
+  const response = await requestAdmin<{ ok: boolean }>(
+    withTenantQuery('/api/admin/workbench/settings/master-password/verify', tenantSlug),
+    adminKey,
+    {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    },
+  );
+
+  return response.ok;
+};
+
+export const updateMasterPasswordForAdmin = async (
+  payload: { currentPassword: string; newPassword: string },
+  adminKey: string,
+  tenantSlug?: string,
+): Promise<AdminSettings> => {
+  const response = await requestAdmin<{ ok: boolean; settings: AdminSettings }>(
+    withTenantQuery('/api/admin/workbench/settings/master-password', tenantSlug),
+    adminKey,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return response.settings;
+};
+
 export const listAdminTenants = async (adminKey: string): Promise<AdminTenant[]> => {
   const response = await requestAdmin<{ tenants: AdminTenant[] }>('/api/admin/workbench/tenants', adminKey, { method: 'GET' });
   return response.tenants;

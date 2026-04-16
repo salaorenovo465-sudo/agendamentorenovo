@@ -6,6 +6,7 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, process.cwd(), '');
   const appBasePath = (env.VITE_APP_BASE_PATH || '').trim().replace(/^\/+|\/+$/g, '');
+  const devApiProxyTarget = (env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:3001').trim();
 
   return {
     base: appBasePath ? `/${appBasePath}/` : '/',
@@ -27,6 +28,16 @@ export default defineConfig(({mode}) => {
     },
     server: {
       allowedHosts: true,
+      proxy: {
+        '/api': {
+          target: devApiProxyTarget,
+          changeOrigin: true,
+        },
+        '/health': {
+          target: devApiProxyTarget,
+          changeOrigin: true,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify - file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

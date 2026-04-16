@@ -4,6 +4,7 @@ import { Clock, Calendar, Loader2 } from 'lucide-react';
 interface BookingData {
   service: string;
   servicePrice: string;
+  selectedServices: { category: string; name: string; price: string }[];
   date: string;
   time: string;
   name: string;
@@ -20,7 +21,7 @@ interface TimePickerProps {
 export default function TimePicker({ bookingData, setBookingData, bookedSlots, isLoadingSlots }: TimePickerProps) {
   if (!bookingData.date) {
     return (
-      <div className="py-6 text-center text-sm font-medium text-luxury-muted/60 bg-luxury-light/30 rounded-xl border border-dashed border-luxury-dark/8">
+      <div className="py-6 text-center text-sm font-medium text-luxury-muted/60 bg-luxury-light/30 rounded-lg border border-dashed border-luxury-dark/8">
         <Calendar className="w-5 h-5 mx-auto mb-2 text-luxury-gold/40" />
         Selecione uma data acima
       </div>
@@ -37,9 +38,9 @@ export default function TimePicker({ bookingData, setBookingData, bookedSlots, i
   }
 
   return (
-    <div className="relative w-full max-w-sm mx-auto py-8 px-4 bg-gradient-to-b from-[#F9F7F2] to-[#EBE4D5] rounded-[2.5rem] shadow-[inset_0_2px_10px_rgba(255,255,255,0.8),0_10px_30px_rgba(0,0,0,0.05)] border border-white/60 overflow-hidden">
+    <div className="booking-time-panel relative w-full max-w-sm mx-auto py-7 px-4 bg-gradient-to-b from-[#F9F7F2] to-[#EBE4D5] shadow-[inset_0_2px_10px_rgba(255,255,255,0.8),0_10px_30px_rgba(0,0,0,0.05)] border border-white/60 overflow-hidden">
       {/* Highlight bar in the middle */}
-      <div className="absolute top-1/2 left-6 right-6 h-[4.5rem] -translate-y-1/2 bg-white/70 backdrop-blur-md rounded-2xl border border-luxury-gold/30 shadow-[0_4px_15px_rgba(212,175,55,0.1)] pointer-events-none z-0"></div>
+      <div className="absolute top-1/2 left-6 right-6 h-[4.5rem] -translate-y-1/2 bg-white/70 backdrop-blur-md rounded-lg border border-luxury-gold/30 shadow-[0_4px_15px_rgba(212,175,55,0.1)] pointer-events-none z-0"></div>
 
       <div className="flex items-center justify-center gap-8 relative z-10">
         {/* Coluna de Horas */}

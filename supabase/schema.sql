@@ -2,10 +2,13 @@ create table if not exists public.bookings (
   id bigint generated always as identity primary key,
   service text not null,
   service_price text,
+  service_items jsonb not null default '[]'::jsonb,
   date text not null,
   time text not null,
   name text not null,
   phone text not null,
+  professional_id bigint,
+  professional_name text,
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'rejected', 'completed')),
   google_event_id text,
   whatsapp_thread_id bigint,
@@ -92,9 +95,17 @@ create table if not exists public.services_catalog (
 create table if not exists public.professionals (
   id bigint generated always as identity primary key,
   name text not null,
+  phone text,
+  email text,
+  cpf text,
+  birth_date text,
+  address text,
+  notes text,
   specialties text,
   work_start text,
   work_end text,
+  base_commission numeric(5,2) not null default 0,
+  commission_profile jsonb not null default '[]'::jsonb,
   active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -213,6 +224,7 @@ create index if not exists bookings_date_idx on public.bookings (date);
 create index if not exists bookings_date_time_idx on public.bookings (date, time);
 create index if not exists bookings_status_idx on public.bookings (status);
 create index if not exists bookings_whatsapp_thread_idx on public.bookings (whatsapp_thread_id);
+create index if not exists bookings_professional_id_idx on public.bookings (professional_id);
 create index if not exists whatsapp_threads_last_message_idx on public.whatsapp_threads (last_message_at desc);
 create index if not exists whatsapp_messages_thread_created_idx on public.whatsapp_messages (thread_id, created_at desc);
 create index if not exists whatsapp_conversation_meta_status_idx on public.whatsapp_conversation_meta (status);

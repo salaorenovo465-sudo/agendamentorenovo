@@ -1,14 +1,145 @@
-import type { Dispatch, SetStateAction } from 'react';
-import { AlertTriangle, CheckCircle2, Download, Sparkles, Trash2, XCircle } from 'lucide-react';
+﻿import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import {
+  AlertTriangle,
+  CalendarPlus,
+  CheckCircle2,
+  Clock3,
+  Download,
+  Loader2,
+  Phone,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  UserRound,
+  X,
+  XCircle,
+  Zap,
+} from 'lucide-react';
 import { formatDateBR } from '../AdminUtils';
 import { exportBookingsCSV } from '../AdminFeatures';
-import type { AdminBooking } from '../types';
+import { getBookingAvailability } from '../api';
+import type { AdminBooking, AdminCreateBookingPayload } from '../types';
+import {
+  createCollaboratorDraft,
+  extractBookingServiceItems,
+  getCollaboratorCoverage,
+  type ServiceCatalogCategory,
+  type ServiceCatalogItem,
+} from '../collaboratorUtils';
+
+type SelectedAgendaService = {
+  category: string;
+  name: string;
+  price: string;
+};
+
+type CreateBookingForm = {
+  name: string;
+  phone: string;
+  category: string;
+  service: string;
+  servicePrice: string;
+  selectedServices: SelectedAgendaService[];
+  date: string;
+  time: string;
+  professionalId: string;
+  professionalName: string;
+  status: 'pending' | 'confirmed';
+};
+
+type AvailabilityState = {
+  busySlots: string[];
+  loading: boolean;
+  error: string;
+  limitReached: boolean;
+};
+
+const AGENDA_TIME_SLOTS = [
+  '08:00',
+  '09:00',
+  '10:00',
+  '11:00',
+  '12:00',
+  '13:00',
+  '14:00',
+  '15:00',
+  '16:00',
+  '17:00',
+  '18:00',
+  '19:00',
+  '20:00',
+];
+
+const STATUS_LABELS: Record<AdminBooking['status'], string> = {
+  pending: 'Pendente',
+  confirmed: 'Confirmado',
+  rejected: 'Rejeitado',
+  completed: 'Finalizado',
+};
+
+const normalizeDigits = (value: string): string => value.replace(/\D/g, '');
+
+const parseMoneyAmount = (value: string | null | undefined): number => {
+  if (!value) return 0;
+  const match = value.match(/[\d.]+(?:,\d{2})?|\d+(?:\.\d{2})?/);
+  if (!match) return 0;
+  return Number(match[0].replace(/\.(?=\d{3})/g, '').replace(',', '.')) || 0;
+};
+
+const buildInitialForm = (catalog: ServiceCatalogCategory[], date: string): CreateBookingForm => {
+  const firstCategory = catalog[0];
+
+  return {
+    name: '',
+    phone: '',
+    category: firstCategory?.category || '',
+    service: '',
+    servicePrice: '',
+    selectedServices: [],
+    date,
+    time: '09:00',
+    professionalId: '',
+    professionalName: '',
+    status: 'pending',
+  };
+};
+
+const formatCollaboratorOption = (
+  name: string,
+  matched: number,
+  total: number,
+  fullMatch: boolean,
+): string => {
+  if (total === 0) return name;
+  if (fullMatch) return `${name} - cobertura total`;
+  if (matched > 0) return `${name} - ${matched}/${total} servicos`;
+  return `${name} - sem cobertura mapeada`;
+};
+
+const summarizeAgendaServices = (selectedServices: SelectedAgendaService[]): { service: string; servicePrice: string } => {
+  if (selectedServices.length === 0) {
+    return { service: '', servicePrice: '' };
+  }
+
+  const service = selectedServices.map((item) => item.name).join(' + ');
+  const total = selectedServices.reduce((sum, item) => sum + parseMoneyAmount(item.price), 0);
+  const hasConsult = selectedServices.some((item) => item.price.toLowerCase().includes('sob consulta') || parseMoneyAmount(item.price) === 0);
+  const totalLabel = total > 0
+    ? `Total estimado ${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+    : 'Sob consulta';
+
+  return {
+    service,
+    servicePrice: hasConsult && total > 0 ? `${totalLabel} + itens sob consulta` : totalLabel,
+  };
+};
 
 export function AgendaTab({
   bookings,
   bookingsLoading,
-  dateFilter,
-  dateFilterEnd,
+  dateScope,
+  dateLabel,
   busyBookingId,
   rescheduleMap,
   setRescheduleMap,
@@ -17,11 +148,16 @@ export function AgendaTab({
   onReject,
   onDelete,
   onReschedule,
+  onCreateBooking,
+  onAssignProfessional,
+  serviceCatalog,
+  professionals,
+  defaultCreateDate,
 }: {
   bookings: AdminBooking[];
   bookingsLoading: boolean;
-  dateFilter: string;
-  dateFilterEnd: string;
+  dateScope: 'all' | 'range';
+  dateLabel: string;
   busyBookingId: number | null;
   rescheduleMap: Record<number, { date: string; time: string }>;
   setRescheduleMap: Dispatch<SetStateAction<Record<number, { date: string; time: string }>>>;
@@ -30,89 +166,633 @@ export function AgendaTab({
   onReject: (booking: AdminBooking) => Promise<void>;
   onDelete: (booking: AdminBooking) => Promise<void>;
   onReschedule: (booking: AdminBooking) => Promise<void>;
+  onCreateBooking: (payload: AdminCreateBookingPayload) => Promise<void>;
+  onAssignProfessional: (booking: AdminBooking, professionalId: number | null) => Promise<void>;
+  serviceCatalog: ServiceCatalogCategory[];
+  professionals: Record<string, unknown>[];
+  defaultCreateDate: string;
 }) {
   const now = new Date();
-  const isOverdue = (b: AdminBooking) => {
-    if (b.status === 'completed' || b.status === 'rejected') return false;
-    const bookingDate = new Date(`${b.date}T${b.time}`);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState<CreateBookingForm>(() => buildInitialForm(serviceCatalog, defaultCreateDate));
+  const [serviceQuery, setServiceQuery] = useState('');
+  const [createError, setCreateError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [availability, setAvailability] = useState<AvailabilityState>({
+    busySlots: [],
+    loading: false,
+    error: '',
+    limitReached: false,
+  });
+
+  const collaborators = useMemo(
+    () => professionals
+      .map((row) => createCollaboratorDraft(row, serviceCatalog))
+      .filter((row) => row.id && row.name)
+      .sort((a, b) => Number(b.active) - Number(a.active) || a.name.localeCompare(b.name, 'pt-BR')),
+    [professionals, serviceCatalog],
+  );
+
+  const availableCollaborators = useMemo(
+    () => collaborators.filter((row) => row.active),
+    [collaborators],
+  );
+
+  const isOverdue = (booking: AdminBooking) => {
+    if (booking.status === 'completed' || booking.status === 'rejected') return false;
+    const bookingDate = new Date(`${booking.date}T${booking.time}`);
     return bookingDate < now;
   };
-  const pending = bookings.filter((b) => b.status === 'pending' && !isOverdue(b));
-  const confirmed = bookings.filter((b) => b.status === 'confirmed' && !isOverdue(b));
-  const overdue = bookings.filter((b) => isOverdue(b));
-  const completed = bookings.filter((b) => b.status === 'completed');
+
+  const pending = bookings.filter((booking) => booking.status === 'pending' && !isOverdue(booking));
+  const confirmed = bookings.filter((booking) => booking.status === 'confirmed' && !isOverdue(booking));
+  const overdue = bookings.filter((booking) => isOverdue(booking));
+  const completed = bookings.filter((booking) => booking.status === 'completed');
+
+  const currentCategory = serviceCatalog.find((category) => category.category === createForm.category) || serviceCatalog[0];
+  const currentServices = currentCategory?.items || [];
+  const serviceSummary = summarizeAgendaServices(createForm.selectedServices);
+  const filteredServices = currentServices.filter((service) => {
+    const query = serviceQuery.trim().toLowerCase();
+    if (!query) return true;
+    return `${service.name} ${service.desc || ''} ${service.price}`.toLowerCase().includes(query);
+  });
+
+  const createCollaboratorOptions = useMemo(() => {
+    return [...availableCollaborators].sort((a, b) => {
+      const coverageA = getCollaboratorCoverage(a, createForm.selectedServices);
+      const coverageB = getCollaboratorCoverage(b, createForm.selectedServices);
+
+      if (Number(coverageB.fullMatch) !== Number(coverageA.fullMatch)) {
+        return Number(coverageB.fullMatch) - Number(coverageA.fullMatch);
+      }
+
+      if (coverageB.matched !== coverageA.matched) {
+        return coverageB.matched - coverageA.matched;
+      }
+
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }, [availableCollaborators, createForm.selectedServices]);
+
+  const isSlotBusy = (slot: string): boolean => availability.busySlots.includes('all') || availability.busySlots.includes(slot);
+  const selectedTimeBusy = isSlotBusy(createForm.time);
+  const availableSlotsCount = AGENDA_TIME_SLOTS.filter((slot) => !isSlotBusy(slot)).length;
+  const selectedCreateCollaborator = createCollaboratorOptions.find((row) => String(row.id) === createForm.professionalId)
+    || availableCollaborators.find((row) => String(row.id) === createForm.professionalId)
+    || null;
+  const selectedCreateCoverage = selectedCreateCollaborator
+    ? getCollaboratorCoverage(selectedCreateCollaborator, createForm.selectedServices)
+    : null;
+
+  const agendaStats = useMemo(() => {
+    const active = pending.length + confirmed.length + overdue.length;
+    const assigned = bookings.filter((booking) => booking.professionalId).length;
+
+    return [
+      { label: dateScope === 'all' ? 'Total geral' : 'Total no periodo', value: bookings.length, tone: 'wine' },
+      { label: 'Operacao ativa', value: active, tone: 'gold' },
+      { label: 'Com colaborador', value: assigned, tone: 'green' },
+    ];
+  }, [bookings, dateScope, overdue.length, pending.length, confirmed.length]);
+
+  useEffect(() => {
+    if (!createOpen || !createForm.date) return;
+
+    let active = true;
+    setAvailability({ busySlots: [], loading: true, error: '', limitReached: false });
+
+    getBookingAvailability(createForm.date)
+      .then((data) => {
+        if (!active) return;
+        setAvailability({
+          busySlots: data.busySlots || [],
+          loading: false,
+          error: '',
+          limitReached: Boolean(data.limitReached),
+        });
+      })
+      .catch((error) => {
+        if (!active) return;
+        setAvailability({
+          busySlots: [],
+          loading: false,
+          error: error instanceof Error ? error.message : 'Erro ao consultar disponibilidade.',
+          limitReached: false,
+        });
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [createOpen, createForm.date]);
+
+  const openCreateModal = () => {
+    setCreateForm(buildInitialForm(serviceCatalog, defaultCreateDate));
+    setServiceQuery('');
+    setCreateError('');
+    setCreateOpen(true);
+  };
+
+  const handleCategoryChange = (categoryName: string) => {
+    setCreateForm((current) => ({
+      ...current,
+      category: categoryName,
+    }));
+    setServiceQuery('');
+  };
+
+  const handleServiceSelect = (service: ServiceCatalogItem) => {
+    const exists = createForm.selectedServices.some((item) => item.name === service.name);
+    const nextServices = exists
+      ? createForm.selectedServices.filter((item) => item.name !== service.name)
+      : [...createForm.selectedServices, { category: createForm.category, name: service.name, price: service.price }];
+    const nextSummary = summarizeAgendaServices(nextServices);
+
+    setCreateForm((current) => ({
+      ...current,
+      selectedServices: nextServices,
+      service: nextSummary.service,
+      servicePrice: nextSummary.servicePrice,
+    }));
+  };
+
+  const handleCreateProfessionalChange = (value: string) => {
+    const selected = availableCollaborators.find((row) => String(row.id) === value) || null;
+
+    setCreateForm((current) => ({
+      ...current,
+      professionalId: value,
+      professionalName: selected?.name || '',
+      status: value ? current.status : 'pending',
+    }));
+  };
+
+  const canCreate =
+    createForm.name.trim().length >= 3 &&
+    normalizeDigits(createForm.phone).length >= 8 &&
+    createForm.selectedServices.length > 0 &&
+    /^\d{4}-\d{2}-\d{2}$/.test(createForm.date) &&
+    /^\d{2}:\d{2}$/.test(createForm.time) &&
+    !availability.loading &&
+    !selectedTimeBusy &&
+    (createForm.status === 'pending' || Boolean(createForm.professionalId));
+
+  const handleCreateSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setCreateError('');
+
+    if (createForm.status === 'confirmed' && !createForm.professionalId) {
+      setCreateError('Selecione o colaborador antes de criar um agendamento ja confirmado.');
+      return;
+    }
+
+    if (!canCreate) {
+      setCreateError(selectedTimeBusy ? 'Escolha um horario livre para criar o agendamento.' : 'Preencha cliente, telefone, servicos, data e horario.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await onCreateBooking({
+        name: createForm.name.trim(),
+        phone: createForm.phone.trim(),
+        service: serviceSummary.service,
+        servicePrice: serviceSummary.servicePrice || null,
+        serviceItems: createForm.selectedServices,
+        date: createForm.date,
+        time: createForm.time,
+        professionalId: createForm.professionalId ? Number(createForm.professionalId) : null,
+        professionalName: createForm.professionalName || null,
+        status: createForm.status,
+      });
+      setCreateOpen(false);
+      setCreateForm(buildInitialForm(serviceCatalog, defaultCreateDate));
+    } catch (error) {
+      setCreateError(error instanceof Error ? error.message : 'Erro ao criar agendamento.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const renderBookingCard = (booking: AdminBooking, showOverdueAlert?: boolean) => {
     const schedule = rescheduleMap[booking.id] || { date: booking.date, time: booking.time };
     const busy = busyBookingId === booking.id;
+    const statusKey = showOverdueAlert ? 'overdue' : booking.status;
+    const hasCollaborator = Boolean(booking.professionalId && booking.professionalName);
+    const canEditCollaborator = booking.status !== 'completed' && booking.status !== 'rejected';
+    const serviceItems = extractBookingServiceItems(booking);
+
     return (
-      <div key={booking.id} className={`admin-pipeline-card ${showOverdueAlert ? 'admin-pipeline-card-pending' : `admin-pipeline-card-${booking.status}`}`} style={showOverdueAlert ? { borderLeft: '4px solid #dc2626', background: 'rgba(220,38,38,0.03)' } : undefined}>
+      <div key={booking.id} className={`agenda-booking-card agenda-booking-card-${statusKey}`} aria-busy={busy}>
+        <div className="agenda-card-topline">
+          <span className={`agenda-status-pill agenda-status-${statusKey}`}>
+            {showOverdueAlert ? 'Atrasado' : STATUS_LABELS[booking.status]}
+          </span>
+          <span className="agenda-card-id">#{booking.id}</span>
+        </div>
+
         {showOverdueAlert && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6, padding: '3px 8px', borderRadius: 6, background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.15)', fontSize: 10, fontWeight: 700, color: '#dc2626' }}>
-            <AlertTriangle style={{ width: 11, height: 11 }} /> Atrasado — sem finalização
+          <div className="agenda-overdue-ribbon">
+            <AlertTriangle style={{ width: 12, height: 12 }} /> passou do horario sem finalizacao
           </div>
         )}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <div className="admin-avatar">{booking.name.charAt(0).toUpperCase()}</div>
-          <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{booking.name}</p>
-            <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: 0 }}>{booking.service} • {formatDateBR(booking.date)} {booking.time}</p>
+
+        <div className="agenda-client-row">
+          <div className="admin-avatar agenda-avatar">{booking.name.charAt(0).toUpperCase()}</div>
+          <div className="agenda-client-copy">
+            <p>{booking.name}</p>
+            <span>{booking.service}</span>
           </div>
         </div>
-        <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '0 0 8px' }}>{booking.phone} • {booking.servicePrice || 'Sob consulta'}</p>
-        {booking.status !== 'completed' && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-            <input type="date" className="admin-input-sm" style={{ fontSize: 10, padding: '2px 6px', width: 110 }} value={schedule.date} onChange={(e) => setRescheduleMap((c) => ({ ...c, [booking.id]: { ...schedule, date: e.target.value } }))} />
-            <input type="time" className="admin-input-sm" style={{ fontSize: 10, padding: '2px 6px', width: 80 }} value={schedule.time} onChange={(e) => setRescheduleMap((c) => ({ ...c, [booking.id]: { ...schedule, time: e.target.value } }))} />
+
+        <div className="agenda-card-meta-grid">
+          <div>
+            <span>Data</span>
+            <strong>{formatDateBR(booking.date)}</strong>
+          </div>
+          <div>
+            <span>Hora</span>
+            <strong>{booking.time}</strong>
+          </div>
+          <div>
+            <span>Valor</span>
+            <strong>{booking.servicePrice || 'Sob consulta'}</strong>
+          </div>
+          <div>
+            <span>Colaborador</span>
+            <strong>{booking.professionalName || 'Nao definido'}</strong>
+          </div>
+        </div>
+
+        <div className="agenda-phone-line">
+          <Phone style={{ width: 12, height: 12 }} /> {booking.phone}
+        </div>
+
+        {serviceItems.length > 0 && (
+          <div className="agenda-selected-services agenda-inline-services">
+            {serviceItems.map((service) => (
+              <button key={`${booking.id}-${service.name}`} type="button" disabled>
+                <span>{service.name}</span>
+              </button>
+            ))}
           </div>
         )}
-        <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline" style={{ fontSize: 11, padding: '6px 10px' }}>Remarcar</button>}
-          {booking.status !== 'confirmed' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void onConfirm(booking)} className="admin-btn-success" style={{ fontSize: 11, padding: '6px 10px' }}><CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar</button>}
-          {(booking.status === 'confirmed' || isOverdue(booking)) && <button disabled={busy} onClick={() => void onComplete(booking)} className="admin-btn-primary" style={{ fontSize: 11, padding: '6px 10px' }}><Sparkles style={{ width: 12, height: 12 }} /> Finalizar</button>}
-          {booking.status !== 'rejected' && booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger" style={{ fontSize: 11, padding: '6px 10px' }}><XCircle style={{ width: 12, height: 12 }} /> Rejeitar</button>}
-          <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline" style={{ fontSize: 11, padding: '6px 10px', color: '#dc2626', borderColor: '#dc2626' }}><Trash2 style={{ width: 12, height: 12 }} /> Excluir</button>
+
+        <div className="agenda-assignee-panel">
+          <label className="admin-label">Colaborador responsavel</label>
+          <select
+            className="admin-input"
+            value={booking.professionalId ? String(booking.professionalId) : ''}
+            onChange={(event) => { void onAssignProfessional(booking, event.target.value ? Number(event.target.value) : null); }}
+            disabled={busy || !canEditCollaborator}
+          >
+            <option value="" disabled={booking.status !== 'pending'}>{booking.status === 'pending' ? 'Selecionar colaborador' : 'Colaborador obrigatorio'}</option>
+            {availableCollaborators.map((collaborator) => (
+              <option key={collaborator.id} value={collaborator.id}>
+                {collaborator.name}
+              </option>
+            ))}
+          </select>
+          <small className={`agenda-assignee-help ${hasCollaborator ? 'ok' : 'warning'}`}>
+            {hasCollaborator ? `Responsavel atual: ${booking.professionalName}` : 'Obrigatorio para sair de pendente.'}
+          </small>
+        </div>
+
+        {!hasCollaborator && booking.status === 'pending' && (
+          <div className="agenda-booking-warning">
+            <AlertTriangle style={{ width: 12, height: 12 }} /> selecione o colaborador antes de confirmar ou finalizar
+          </div>
+        )}
+
+        {booking.status !== 'completed' && (
+          <div className="agenda-reschedule-row">
+            <input
+              type="date"
+              className="admin-input-sm"
+              value={schedule.date}
+              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, date: event.target.value } }))}
+            />
+            <input
+              type="time"
+              className="admin-input-sm"
+              value={schedule.time}
+              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, time: event.target.value } }))}
+            />
+          </div>
+        )}
+
+        <div className="agenda-card-actions">
+          {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline">Remarcar</button>}
+          {booking.status !== 'confirmed' && booking.status !== 'completed' && (
+            <button disabled={busy || !hasCollaborator} onClick={() => void onConfirm(booking)} className="admin-btn-success">
+              <CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar
+            </button>
+          )}
+          {(booking.status === 'confirmed' || isOverdue(booking)) && (
+            <button disabled={busy || !hasCollaborator} onClick={() => void onComplete(booking)} className="admin-btn-primary">
+              <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
+            </button>
+          )}
+          {booking.status !== 'rejected' && booking.status !== 'completed' && (
+            <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
+              <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
+            </button>
+          )}
+          <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
+            <Trash2 style={{ width: 12, height: 12 }} /> Excluir
+          </button>
         </div>
       </div>
     );
   };
 
-  const dateLabel = dateFilter === dateFilterEnd ? formatDateBR(dateFilter) : `${formatDateBR(dateFilter)} — ${formatDateBR(dateFilterEnd)}`;
+  const boardColumns = [
+    ...(overdue.length > 0 ? [{ key: 'overdue', label: 'Atrasados', tone: 'danger', items: overdue, overdue: true }] : []),
+    { key: 'pending', label: 'Pendentes', tone: 'warning', items: pending, overdue: false },
+    { key: 'confirmed', label: 'Confirmados', tone: 'success', items: confirmed, overdue: false },
+    { key: 'completed', label: 'Finalizados', tone: 'done', items: completed, overdue: false },
+  ];
 
   return (
-    <div>
+    <div className="agenda-page-shell">
+      <section className="agenda-command-center">
+        <div className="agenda-command-copy">
+          <span className="agenda-eyebrow"><Zap style={{ width: 13, height: 13 }} /> Painel quantico de agenda</span>
+          <h2>Agenda operacional - {dateLabel}</h2>
+          <p>Controle os horarios, resolva atrasos, confirme clientes e crie novos agendamentos sem sair desta aba.</p>
+        </div>
+
+        <div className="agenda-command-actions">
+          {bookings.length > 0 && (
+            <button onClick={() => exportBookingsCSV(bookings)} className="admin-btn-outline agenda-header-btn">
+              <Download className="w-3 h-3" /> Exportar CSV
+            </button>
+          )}
+          <button onClick={openCreateModal} className="admin-btn-primary agenda-new-booking-btn">
+            <CalendarPlus style={{ width: 16, height: 16 }} /> Novo agendamento
+          </button>
+        </div>
+
+        <div className="agenda-stat-grid">
+          {agendaStats.map((stat) => (
+            <div key={stat.label} className={`agenda-stat-card agenda-stat-${stat.tone}`}>
+              <span>{stat.label}</span>
+              <strong>{stat.value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
       {overdue.length > 0 && (
-        <div style={{ marginBottom: 16, padding: '12px 16px', borderRadius: 'var(--admin-radius-sm)', background: 'rgba(220,38,38,0.06)', border: '1.5px solid rgba(220,38,38,0.15)', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertTriangle style={{ width: 18, height: 18, color: '#dc2626', flexShrink: 0 }} />
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#dc2626' }}>{overdue.length} agendamento(s) atrasado(s) — passaram da data/hora e não foram finalizados nem rejeitados</span>
+        <div className="agenda-overdue-alert">
+          <AlertTriangle style={{ width: 18, height: 18, flexShrink: 0 }} />
+          <span>{overdue.length} agendamento(s) atrasado(s) precisam de finalizacao, remarcacao ou rejeicao.</span>
         </div>
       )}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>Agenda — {dateLabel}</h3>
-        {bookings.length > 0 && (
-          <button onClick={() => exportBookingsCSV(bookings)} className="admin-btn-outline" style={{ fontSize: 11, padding: '4px 10px', display: 'flex', alignItems: 'center', gap: 4 }}><Download className="w-3 h-3" /> CSV</button>
-        )}
-      </div>
-      {bookingsLoading ? <p style={{ fontSize: 13, color: 'var(--admin-text-muted)' }}>Carregando...</p> : (
-        <div className="admin-pipeline" style={{ gridTemplateColumns: overdue.length > 0 ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)' }}>
-          {overdue.length > 0 && (
-            <div className="admin-pipeline-col" style={{ borderTop: '3px solid #dc2626' }}>
-              <div className="admin-pipeline-col-header" style={{ color: '#dc2626' }}>Atrasados <span className="admin-pipeline-count" style={{ background: 'rgba(220,38,38,0.1)', color: '#dc2626' }}>{overdue.length}</span></div>
-              <div className="admin-pipeline-cards">{overdue.map((b) => renderBookingCard(b, true))}</div>
+
+      {bookingsLoading ? (
+        <div className="agenda-loading-state">
+          <Loader2 style={{ width: 18, height: 18 }} className="animate-spin" /> Carregando agenda...
+        </div>
+      ) : (
+        <div className="agenda-board" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(260px, 1fr))` }}>
+          {boardColumns.map((column) => (
+            <section key={column.key} className={`agenda-board-column agenda-board-${column.tone}`}>
+              <header>
+                <div>
+                  <span>{column.label}</span>
+                  <strong>{column.items.length}</strong>
+                </div>
+              </header>
+              <div className="agenda-column-scroll">
+                {column.items.length === 0 ? (
+                  <div className="agenda-empty-column">Nenhum agendamento nesta etapa.</div>
+                ) : (
+                  column.items.map((booking) => renderBookingCard(booking, column.overdue))
+                )}
+              </div>
+            </section>
+          ))}
+        </div>
+      )}
+
+      {createOpen && (
+        <div className="admin-modal-root agenda-create-root">
+          <div className="admin-modal-overlay" onClick={() => setCreateOpen(false)} />
+          <form className="agenda-create-modal" onSubmit={handleCreateSubmit} role="dialog" aria-modal="true">
+            <header className="agenda-create-header">
+              <div>
+                <span className="agenda-eyebrow"><ShieldCheck style={{ width: 13, height: 13 }} /> Criacao assistida</span>
+                <h3>Novo agendamento na Agenda</h3>
+                <p>Cliente, servicos, colaborador, disponibilidade e status em um unico painel de controle.</p>
+              </div>
+              <button type="button" className="agenda-modal-close" onClick={() => setCreateOpen(false)} aria-label="Fechar modal">
+                <X style={{ width: 18, height: 18 }} />
+              </button>
+            </header>
+
+            <div className="agenda-create-modal-body">
+              <section className="agenda-create-panel agenda-client-panel">
+                <div className="agenda-panel-title">
+                  <UserRound style={{ width: 16, height: 16 }} /> Cliente e comando
+                </div>
+
+                <label className="admin-label">Nome do cliente</label>
+                <input
+                  className="admin-input"
+                  value={createForm.name}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
+                  placeholder="Nome completo"
+                  autoFocus
+                />
+
+                <label className="admin-label">WhatsApp</label>
+                <input
+                  className="admin-input"
+                  value={createForm.phone}
+                  onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))}
+                  placeholder="(31) 99999-9999"
+                />
+
+                <div className="agenda-two-fields">
+                  <div>
+                    <label className="admin-label">Data</label>
+                    <input
+                      type="date"
+                      className="admin-input"
+                      value={createForm.date}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, date: event.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <label className="admin-label">Horario</label>
+                    <input
+                      type="time"
+                      className="admin-input"
+                      value={createForm.time}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, time: event.target.value }))}
+                    />
+                  </div>
+                </div>
+
+                <label className="admin-label">Colaborador responsavel</label>
+                <select
+                  className="admin-input"
+                  value={createForm.professionalId}
+                  onChange={(event) => handleCreateProfessionalChange(event.target.value)}
+                >
+                  <option value="">Atribuir depois</option>
+                  {createCollaboratorOptions.map((collaborator) => {
+                    const coverage = getCollaboratorCoverage(collaborator, createForm.selectedServices);
+                    return (
+                      <option key={collaborator.id} value={collaborator.id}>
+                        {formatCollaboratorOption(collaborator.name, coverage.matched, coverage.total, coverage.fullMatch)}
+                      </option>
+                    );
+                  })}
+                </select>
+                <small className={`agenda-assignee-help ${selectedCreateCollaborator ? 'ok' : 'warning'}`}>
+                  {selectedCreateCollaborator
+                    ? selectedCreateCoverage?.fullMatch
+                      ? `${selectedCreateCollaborator.name} cobre todos os servicos selecionados.`
+                      : `${selectedCreateCollaborator.name} cobre ${selectedCreateCoverage?.matched || 0}/${selectedCreateCoverage?.total || 0} servicos.`
+                    : 'Obrigatorio apenas para criar ja confirmado ou para tirar do pendente depois.'}
+                </small>
+
+                <label className="admin-label">Status inicial</label>
+                <div className="agenda-status-choice">
+                  <button
+                    type="button"
+                    className={createForm.status === 'pending' ? 'active' : ''}
+                    onClick={() => setCreateForm((current) => ({ ...current, status: 'pending' }))}
+                  >
+                    Pendente
+                  </button>
+                  <button
+                    type="button"
+                    className={createForm.status === 'confirmed' ? 'active' : ''}
+                    disabled={!createForm.professionalId}
+                    onClick={() => setCreateForm((current) => ({ ...current, status: 'confirmed' }))}
+                  >
+                    Confirmado
+                  </button>
+                </div>
+              </section>
+
+              <section className="agenda-create-panel agenda-service-panel">
+                <div className="agenda-panel-title">
+                  <Sparkles style={{ width: 16, height: 16 }} /> Servico
+                </div>
+
+                <div className="agenda-category-strip">
+                  {serviceCatalog.map((category) => (
+                    <button
+                      key={category.category}
+                      type="button"
+                      className={category.category === createForm.category ? 'active' : ''}
+                      onClick={() => handleCategoryChange(category.category)}
+                    >
+                      {category.category}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="agenda-search-box">
+                  <Search style={{ width: 14, height: 14 }} />
+                  <input value={serviceQuery} onChange={(event) => setServiceQuery(event.target.value)} placeholder="Buscar servico..." />
+                </div>
+
+	                <div className="agenda-service-list">
+	                  {filteredServices.map((service) => {
+	                    const isSelected = createForm.selectedServices.some((item) => item.name === service.name);
+	                    return (
+	                      <button
+	                        key={service.name}
+	                        type="button"
+	                        className={`agenda-service-option ${isSelected ? 'active' : ''}`}
+	                        onClick={() => handleServiceSelect(service)}
+	                      >
+	                        <span>{service.name}</span>
+	                        <small>{service.desc || 'Servico do catalogo'}</small>
+	                        <strong>{service.price}</strong>
+	                      </button>
+	                    );
+	                  })}
+	                  {filteredServices.length === 0 && <div className="agenda-empty-column">Nenhum servico encontrado.</div>}
+	                </div>
+	                {createForm.selectedServices.length > 0 && (
+	                  <div className="agenda-selected-services">
+	                    {createForm.selectedServices.map((service) => (
+	                      <button key={service.name} type="button" onClick={() => handleServiceSelect(service)}>
+	                        <span>{service.name}</span>
+	                        <X style={{ width: 12, height: 12 }} />
+	                      </button>
+	                    ))}
+	                  </div>
+	                )}
+	              </section>
+
+              <section className="agenda-create-panel agenda-orbit-panel">
+                <div className="agenda-panel-title">
+                  <Clock3 style={{ width: 16, height: 16 }} /> Horarios e revisao
+                </div>
+
+                <div className="agenda-availability-card">
+                  <span>{availability.loading ? 'Sincronizando disponibilidade...' : 'Disponibilidade do dia'}</span>
+                  <strong>{availability.loading ? '...' : `${availableSlotsCount}/${AGENDA_TIME_SLOTS.length} livres`}</strong>
+                  {availability.error && <p>{availability.error}</p>}
+                  {availability.limitReached && <p>Limite diario atingido.</p>}
+                </div>
+
+                <div className="agenda-time-grid">
+                  {AGENDA_TIME_SLOTS.map((slot) => {
+                    const blocked = isSlotBusy(slot);
+                    return (
+                      <button
+                        key={slot}
+                        type="button"
+                        disabled={blocked}
+                        className={`${createForm.time === slot ? 'active' : ''} ${blocked ? 'blocked' : ''}`}
+                        onClick={() => setCreateForm((current) => ({ ...current, time: slot }))}
+                      >
+                        {slot}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="agenda-review-card">
+                  <span>Resumo quantico</span>
+                  <h4>{createForm.name.trim() || 'Cliente ainda sem nome'}</h4>
+                  <p>{serviceSummary.service || 'Selecione um ou mais servicos'}</p>
+                  <div>
+                    <strong>{createForm.date ? formatDateBR(createForm.date) : '--'} as {createForm.time}</strong>
+                    <small>{serviceSummary.servicePrice || 'Valor sob consulta'}</small>
+                  </div>
+                  <div>
+                    <strong>{createForm.professionalName || 'Sem colaborador definido'}</strong>
+                    <small>{createForm.status === 'confirmed' ? 'Status inicial confirmado' : 'Entrara em pendente'}</small>
+                  </div>
+                  <div className={`agenda-review-status ${selectedTimeBusy ? 'blocked' : 'ok'}`}>
+                    {selectedTimeBusy ? 'Horario indisponivel' : 'Horario liberado'}
+                  </div>
+                </div>
+              </section>
             </div>
-          )}
-          <div className="admin-pipeline-col admin-pipeline-pending">
-            <div className="admin-pipeline-col-header">Pendentes <span className="admin-pipeline-count">{pending.length}</span></div>
-            <div className="admin-pipeline-cards">{pending.map((b) => renderBookingCard(b))}</div>
-          </div>
-          <div className="admin-pipeline-col admin-pipeline-confirmed">
-            <div className="admin-pipeline-col-header">Confirmados <span className="admin-pipeline-count">{confirmed.length}</span></div>
-            <div className="admin-pipeline-cards">{confirmed.map((b) => renderBookingCard(b))}</div>
-          </div>
-          <div className="admin-pipeline-col" style={{ borderTop: '3px solid #6366f1', background: 'linear-gradient(135deg, rgba(99,102,241,0.04), transparent)' }}>
-            <div className="admin-pipeline-col-header" style={{ color: '#6366f1' }}>Finalizados <span className="admin-pipeline-count" style={{ background: 'rgba(99,102,241,0.08)', color: '#6366f1' }}>{completed.length}</span></div>
-            <div className="admin-pipeline-cards">{completed.map((b) => renderBookingCard(b))}</div>
-          </div>
+
+            <footer className="agenda-create-footer">
+              <div>
+                {createError && <span className="agenda-create-error">{createError}</span>}
+                {!createError && <span>{createForm.status === 'confirmed' ? 'Sera criado ja com colaborador definido e pronto para operacao.' : 'Pode ficar pendente e receber o colaborador depois.'}</span>}
+              </div>
+              <button type="button" className="admin-btn-outline" onClick={() => setCreateOpen(false)}>Cancelar</button>
+              <button type="submit" className="admin-btn-primary agenda-create-submit" disabled={!canCreate || submitting}>
+                {submitting ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <CalendarPlus style={{ width: 14, height: 14 }} />}
+                {submitting ? 'Criando...' : 'Criar agendamento'}
+              </button>
+            </footer>
+          </form>
         </div>
       )}
     </div>

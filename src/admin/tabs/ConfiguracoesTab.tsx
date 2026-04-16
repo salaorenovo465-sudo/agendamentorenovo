@@ -1,4 +1,4 @@
-import type { Dispatch, SetStateAction } from 'react';
+import { useState, type Dispatch, type SetStateAction } from 'react';
 import { toStringValue, normalizeTenantSlug } from '../AdminUtils';
 import type { AdminSettings, AdminTenant } from '../types';
 
@@ -16,6 +16,7 @@ export function ConfiguracoesTab({
   savingTenant,
   onCreateTenant,
   onToggleTenantActive,
+  onUpdateMasterPassword,
 }: {
   activeTenant: string;
   settings: AdminSettings;
@@ -30,7 +31,53 @@ export function ConfiguracoesTab({
   savingTenant: boolean;
   onCreateTenant: () => void;
   onToggleTenantActive: (tenant: AdminTenant) => void;
+  onUpdateMasterPassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
 }) {
+  const [currentMasterPassword, setCurrentMasterPassword] = useState('');
+  const [newMasterPassword, setNewMasterPassword] = useState('');
+  const [confirmMasterPassword, setConfirmMasterPassword] = useState('');
+  const [masterPasswordSaving, setMasterPasswordSaving] = useState(false);
+  const [masterPasswordError, setMasterPasswordError] = useState('');
+  const [masterPasswordSuccess, setMasterPasswordSuccess] = useState('');
+
+  const handleMasterPasswordUpdate = async () => {
+    setMasterPasswordError('');
+    setMasterPasswordSuccess('');
+
+    const currentPassword = currentMasterPassword.trim();
+    const nextPassword = newMasterPassword.trim();
+    const confirmation = confirmMasterPassword.trim();
+
+    if (!currentPassword || !nextPassword || !confirmation) {
+      setMasterPasswordError('Preencha a senha atual, a nova senha e a confirmacao.');
+      return;
+    }
+
+    if (nextPassword.length < 4) {
+      setMasterPasswordError('A nova senha master precisa ter pelo menos 4 caracteres.');
+      return;
+    }
+
+    if (nextPassword !== confirmation) {
+      setMasterPasswordError('A confirmacao nao confere com a nova senha master.');
+      return;
+    }
+
+    setMasterPasswordSaving(true);
+    const updated = await onUpdateMasterPassword(currentPassword, nextPassword);
+    setMasterPasswordSaving(false);
+
+    if (!updated) {
+      setMasterPasswordError('Nao foi possivel redefinir a senha master. Confira a senha atual.');
+      return;
+    }
+
+    setCurrentMasterPassword('');
+    setNewMasterPassword('');
+    setConfirmMasterPassword('');
+    setMasterPasswordSuccess('Senha master redefinida. As abas protegidas vao exigir a nova senha.');
+  };
+
   return (
     <div className="admin-analytics-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', margin: 0 }}>Configuracoes gerais</h3>
@@ -80,6 +127,69 @@ export function ConfiguracoesTab({
         <div><label className="admin-label">Politica de cancelamento</label><input className="admin-input" value={toStringValue(settings.cancelPolicy)} onChange={(event) => setSettings((current) => ({ ...current, cancelPolicy: event.target.value }))} /></div>
         <div><label className="admin-label">Inicio atendimento WhatsApp</label><input type="time" className="admin-input" value={toStringValue(settings.whatsappOpenTime)} onChange={(event) => setSettings((current) => ({ ...current, whatsappOpenTime: event.target.value }))} /></div>
         <div><label className="admin-label">Fim atendimento WhatsApp</label><input type="time" className="admin-input" value={toStringValue(settings.whatsappCloseTime)} onChange={(event) => setSettings((current) => ({ ...current, whatsappCloseTime: event.target.value }))} /></div>
+      </div>
+
+      <div className="settings-master-password-panel">
+        <div>
+          <span className="settings-security-kicker">Seguranca interna</span>
+          <h4>Redefinir senha master</h4>
+          <p>
+            Esta senha libera as abas protegidas da central. A aba Configuracoes tambem permanece bloqueada e so abre depois da confirmacao da senha master.
+          </p>
+          {settings.masterPasswordUpdatedAt && (
+            <small>Ultima atualizacao: {new Date(settings.masterPasswordUpdatedAt).toLocaleString('pt-BR')}</small>
+          )}
+        </div>
+
+        <div className="settings-master-password-form">
+          <div>
+            <label className="admin-label">Senha master atual</label>
+            <input
+              type="password"
+              className="admin-input"
+              value={currentMasterPassword}
+              onChange={(event) => {
+                setCurrentMasterPassword(event.target.value);
+                setMasterPasswordError('');
+                setMasterPasswordSuccess('');
+              }}
+              placeholder="Digite a senha atual"
+            />
+          </div>
+          <div>
+            <label className="admin-label">Nova senha master</label>
+            <input
+              type="password"
+              className="admin-input"
+              value={newMasterPassword}
+              onChange={(event) => {
+                setNewMasterPassword(event.target.value);
+                setMasterPasswordError('');
+                setMasterPasswordSuccess('');
+              }}
+              placeholder="Minimo 4 caracteres"
+            />
+          </div>
+          <div>
+            <label className="admin-label">Confirmar nova senha</label>
+            <input
+              type="password"
+              className="admin-input"
+              value={confirmMasterPassword}
+              onChange={(event) => {
+                setConfirmMasterPassword(event.target.value);
+                setMasterPasswordError('');
+                setMasterPasswordSuccess('');
+              }}
+              placeholder="Repita a nova senha"
+            />
+          </div>
+          {masterPasswordError && <p className="settings-master-error">{masterPasswordError}</p>}
+          {masterPasswordSuccess && <p className="settings-master-success">{masterPasswordSuccess}</p>}
+          <button disabled={masterPasswordSaving} onClick={() => void handleMasterPasswordUpdate()} className="admin-btn-primary" style={{ justifySelf: 'flex-start', padding: '10px 18px' }}>
+            {masterPasswordSaving ? 'Redefinindo...' : 'Redefinir senha master'}
+          </button>
+        </div>
       </div>
 
       <div style={{ padding: '10px 14px', borderRadius: 'var(--admin-radius-xs)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)', fontSize: 12, color: 'var(--admin-text-muted)' }}>

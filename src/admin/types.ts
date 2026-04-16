@@ -1,5 +1,11 @@
 export type AdminBookingStatus = 'pending' | 'confirmed' | 'rejected' | 'completed';
 
+export type AdminBookingServiceItem = {
+  category: string;
+  name: string;
+  price: string;
+};
+
 export type AdminConversationOperationalStatus = 'open' | 'pending' | 'resolved';
 
 export type AdminConversationOperational = {
@@ -22,16 +28,32 @@ export type AdminBooking = {
   id: number;
   service: string;
   servicePrice: string | null;
+  serviceItems: AdminBookingServiceItem[];
   date: string;
   time: string;
   name: string;
   phone: string;
+  professionalId?: number | null;
+  professionalName?: string | null;
   status: AdminBookingStatus;
   createdAt: string;
   confirmedAt: string | null;
   rejectedAt: string | null;
   rejectionReason: string | null;
   whatsappThreadId?: number | null;
+};
+
+export type AdminCreateBookingPayload = {
+  service: string;
+  servicePrice: string | null;
+  serviceItems?: AdminBookingServiceItem[];
+  date: string;
+  time: string;
+  name: string;
+  phone: string;
+  professionalId?: number | null;
+  professionalName?: string | null;
+  status?: 'pending' | 'confirmed';
 };
 
 export type AdminInboxConversation = {
@@ -124,6 +146,7 @@ export type AdminSettings = {
   cancelPolicy?: string;
   whatsappOpenTime?: string;
   whatsappCloseTime?: string;
+  masterPasswordUpdatedAt?: string;
   whatsappProvider?: 'chatwoot' | 'legacy' | 'baileys';
   chatwootUrl?: string;
   chatwootAccountId?: string;

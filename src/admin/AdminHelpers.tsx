@@ -196,24 +196,26 @@ export function RejectModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; o
   prevOpen.current = isOpen;
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[9998] flex items-center justify-center p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
-      <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="relative bg-white rounded-2xl shadow-2xl p-6 w-full max-w-md border border-[var(--admin-border)]">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-xl bg-rose-100 flex items-center justify-center">
+    <div className="admin-modal-root">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="admin-modal-overlay" onClick={onClose} />
+      <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="admin-modal-card admin-modal-card-sm" role="dialog" aria-modal="true">
+        <div className="admin-modal-header admin-modal-header-compact">
+          <div className="admin-modal-icon admin-modal-icon-danger">
             <AlertTriangle className="w-5 h-5 text-rose-600" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-[var(--admin-text)]">Rejeitar Agendamento</h3>
-            <p className="text-xs text-[var(--admin-text-muted)]">Esta ação não pode ser desfeita</p>
+            <h3 className="admin-modal-title">Rejeitar Agendamento</h3>
+            <p className="admin-modal-subtitle">Esta ação não pode ser desfeita</p>
           </div>
         </div>
+        <div className="admin-modal-body">
         <textarea
           value={reason} onChange={e => setReason(e.target.value)}
           placeholder="Motivo da rejeição (opcional)..."
-          className="admin-input min-h-[80px] resize-none mb-4"
+          className="admin-input min-h-[96px] resize-none"
         />
-        <div className="flex gap-2 justify-end">
+        </div>
+        <div className="admin-modal-footer">
           <button onClick={onClose} className="admin-btn-outline px-4 py-2 text-sm">Cancelar</button>
           <button onClick={() => { onConfirm(reason); setReason(''); }} className="admin-btn-danger px-4 py-2 text-sm">
             <XCircle className="w-3.5 h-3.5" /> Rejeitar
@@ -230,17 +232,17 @@ export function SearchModal({ isOpen, onClose, onSearch }: { isOpen: boolean; on
   useEffect(() => { if (isOpen) setQuery(''); }, [isOpen]);
   if (!isOpen) return null;
   return (
-    <div className="fixed inset-0 z-[9998] flex items-start justify-center pt-[20vh] p-4">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="absolute inset-0 bg-black/20 backdrop-blur-sm" onClick={onClose} />
-      <motion.div initial={{ opacity: 0, scale: 0.95, y: -20 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-[var(--admin-border)] overflow-hidden">
+    <div className="admin-modal-root admin-modal-root-start">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="admin-modal-overlay admin-modal-overlay-soft" onClick={onClose} />
+      <motion.div initial={{ opacity: 0, scale: 0.95, y: -20 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="admin-modal-card admin-modal-card-search" role="dialog" aria-modal="true">
         <input
           autoFocus value={query}
           onChange={e => { setQuery(e.target.value); onSearch(e.target.value); }}
           onKeyDown={e => e.key === 'Escape' && onClose()}
           placeholder="Buscar clientes, serviços..."
-          className="w-full px-5 py-4 text-base bg-transparent outline-none text-[var(--admin-text)] placeholder:text-[var(--admin-text-muted)]"
+          className="admin-modal-search-input"
         />
-        <div className="px-5 py-2 border-t border-[var(--admin-border)] text-[10px] text-[var(--admin-text-muted)] flex gap-4">
+        <div className="admin-modal-shortcuts">
           <span><kbd className="px-1.5 py-0.5 rounded bg-[var(--admin-surface-2)] text-[9px] font-mono">ESC</kbd> fechar</span>
           <span><kbd className="px-1.5 py-0.5 rounded bg-[var(--admin-surface-2)] text-[9px] font-mono">1-3</kbd> trocar tab</span>
           <span><kbd className="px-1.5 py-0.5 rounded bg-[var(--admin-surface-2)] text-[9px] font-mono">R</kbd> atualizar</span>

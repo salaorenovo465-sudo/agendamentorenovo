@@ -1,4 +1,5 @@
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { API_BASE, apiUrl } from '../../apiBase';
+
 export const ADMIN_KEY_STORAGE = 'renovo_admin_api_key';
 export const ADMIN_AUTH_ERROR_EVENT = 'renovo-admin-auth-error';
 export const ADMIN_TENANT_STORAGE = 'renovo_admin_tenant';
@@ -20,7 +21,7 @@ export const requestAdmin = async <T>(
   adminKey: string,
   options: RequestInit = {},
 ): Promise<T> => {
-  const response = await fetch(`${API_BASE}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...options,
     headers: {
       'Content-Type': 'application/json',

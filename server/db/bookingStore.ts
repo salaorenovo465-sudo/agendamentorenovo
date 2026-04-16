@@ -6,8 +6,10 @@ import { fileURLToPath } from 'url';
 import '../loadEnv';
 import {
   type BookingRecord,
+  type BookingServiceItem,
   type BookingStatus,
   type CreateBookingInput,
+  type UpdateBookingProfessionalInput,
   type UpdateBookingScheduleInput,
   type UpdateBookingStatusInput,
   type UpdateBookingWhatsappThreadInput,
@@ -39,14 +41,76 @@ const toIsoString = (value: unknown): string => {
   return new Date().toISOString();
 };
 
+const normalizeServiceItems = (value: unknown): BookingServiceItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      if (!name) {
+        return null;
+      }
+
+      return {
+        category: typeof row.category === 'string' ? row.category.trim() : '',
+        name,
+        price: typeof row.price === 'string' ? row.price.trim() : '',
+      } satisfies BookingServiceItem;
+    })
+    .filter((item): item is BookingServiceItem => Boolean(item));
+};
+
+const parseServiceItems = (value: unknown): BookingServiceItem[] => {
+  if (Array.isArray(value)) {
+    return normalizeServiceItems(value);
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    try {
+      return normalizeServiceItems(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+
+  return [];
+};
+
+const serializeServiceItems = (value: BookingServiceItem[] | undefined): string | null => {
+  if (!value || value.length === 0) {
+    return null;
+  }
+
+  return JSON.stringify(normalizeServiceItems(value));
+};
+
+const toOptionalNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
 const mapSqliteBooking = (row: Record<string, unknown>): BookingRecord => ({
   id: Number(row.id),
   service: String(row.service ?? ''),
   servicePrice: row.service_price ? String(row.service_price) : null,
+  serviceItems: parseServiceItems(row.service_items),
   date: String(row.date ?? ''),
   time: String(row.time ?? ''),
   name: String(row.name ?? ''),
   phone: String(row.phone ?? ''),
+  professionalId: toOptionalNumber(row.professional_id),
+  professionalName: row.professional_name ? String(row.professional_name) : null,
   status: (row.status as BookingStatus) || 'pending',
   googleEventId: row.google_event_id ? String(row.google_event_id) : null,
   whatsappThreadId: row.whatsapp_thread_id ? Number(row.whatsapp_thread_id) : null,
@@ -62,10 +126,13 @@ const mapSupabaseBooking = (row: Record<string, unknown>): BookingRecord => ({
   id: Number(row.id),
   service: String(row.service ?? ''),
   servicePrice: row.service_price ? String(row.service_price) : null,
+  serviceItems: parseServiceItems(row.service_items),
   date: String(row.date ?? ''),
   time: String(row.time ?? ''),
   name: String(row.name ?? ''),
   phone: String(row.phone ?? ''),
+  professionalId: toOptionalNumber(row.professional_id),
+  professionalName: row.professional_name ? String(row.professional_name) : null,
   status: (row.status as BookingStatus) || 'pending',
   googleEventId: row.google_event_id ? String(row.google_event_id) : null,
   whatsappThreadId: row.whatsapp_thread_id ? Number(row.whatsapp_thread_id) : null,
@@ -113,10 +180,13 @@ class BookingStore {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         service TEXT NOT NULL,
         service_price TEXT,
+        service_items TEXT,
         date TEXT NOT NULL,
         time TEXT NOT NULL,
         name TEXT NOT NULL,
         phone TEXT NOT NULL,
+        professional_id INTEGER,
+        professional_name TEXT,
         status TEXT NOT NULL DEFAULT 'pending',
         google_event_id TEXT,
         whatsapp_thread_id INTEGER,
@@ -129,7 +199,10 @@ class BookingStore {
     `);
 
     this.ensureSqliteColumn('service_price', 'TEXT');
+    this.ensureSqliteColumn('service_items', 'TEXT');
     this.ensureSqliteColumn('status', "TEXT NOT NULL DEFAULT 'pending'");
+    this.ensureSqliteColumn('professional_id', 'INTEGER');
+    this.ensureSqliteColumn('professional_name', 'TEXT');
     this.ensureSqliteColumn('google_event_id', 'TEXT');
     this.ensureSqliteColumn('whatsapp_thread_id', 'INTEGER');
     this.ensureSqliteColumn('rejection_reason', 'TEXT');
@@ -328,10 +401,13 @@ class BookingStore {
         const payload = {
           service: input.service,
           service_price: input.servicePrice,
+          service_items: input.serviceItems && input.serviceItems.length > 0 ? input.serviceItems : null,
           date: input.date,
           time: input.time,
           name: input.name,
           phone: input.phone,
+          professional_id: input.professionalId ?? null,
+          professional_name: input.professionalName ?? null,
           status: 'pending' as BookingStatus,
         };
 
@@ -341,9 +417,20 @@ class BookingStore {
       }
 
       const stmt = this.sqlite.prepare(
-        'INSERT INTO bookings (service, service_price, date, time, name, phone, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
+        'INSERT INTO bookings (service, service_price, service_items, date, time, name, phone, professional_id, professional_name, status, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)',
       );
-      const result = stmt.run(input.service, input.servicePrice, input.date, input.time, input.name, input.phone, 'pending');
+      const result = stmt.run(
+        input.service,
+        input.servicePrice,
+        serializeServiceItems(input.serviceItems),
+        input.date,
+        input.time,
+        input.name,
+        input.phone,
+        input.professionalId ?? null,
+        input.professionalName ?? null,
+        'pending',
+      );
       const created = await this.getById(Number(result.lastInsertRowid));
       if (!created) throw new Error('Falha ao criar agendamento');
       return created;
@@ -397,6 +484,34 @@ class BookingStore {
     this.sqlite
       .prepare('UPDATE bookings SET whatsapp_thread_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
       .run(input.whatsappThreadId, input.id);
+
+    return this.getById(input.id);
+  }
+
+  async updateProfessional(input: UpdateBookingProfessionalInput): Promise<BookingRecord | null> {
+    const now = new Date().toISOString();
+
+    if (this.supabaseEnabled && this.supabase) {
+      const updates = {
+        professional_id: input.professionalId,
+        professional_name: input.professionalName,
+        updated_at: now,
+      };
+
+      const { data, error } = await this.supabase
+        .from('bookings')
+        .update(updates)
+        .eq('id', input.id)
+        .select('*')
+        .maybeSingle();
+
+      if (error) throw error;
+      return data ? mapSupabaseBooking(data as Record<string, unknown>) : null;
+    }
+
+    this.sqlite
+      .prepare('UPDATE bookings SET professional_id = ?, professional_name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(input.professionalId, input.professionalName, input.id);
 
     return this.getById(input.id);
   }

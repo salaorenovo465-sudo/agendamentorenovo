@@ -24,7 +24,9 @@ import {
   ADMIN_AUTH_ERROR_EVENT,
   ADMIN_KEY_STORAGE,
   ADMIN_TENANT_STORAGE,
+  assignProfessionalToAdminBooking,
   completeAdminBooking,
+  createAdminBooking,
   confirmAdminBooking,
   createAdminTenant,
   createWorkbenchEntityForAdmin,
@@ -40,16 +42,19 @@ import {
   saveAdminSettings,
   resetFinanceForAdmin,
   updateAdminTenant,
+  updateMasterPasswordForAdmin,
   updateWorkbenchEntityForAdmin,
+  verifyMasterPasswordForAdmin,
 } from './api';
 import { toast, ToastContainer, RejectModal, useKeyboardShortcuts, triggerConfetti } from './AdminHelpers';
 import PaymentConfirmationTab from './PaymentConfirmationTab';
 import WhatsAppWorkspace from './WhatsAppWorkspace';
-import type { AdminBooking, AdminSettings, AdminTenant, WorkbenchEntity, WorkbenchOverview } from './types';
+import type { AdminBooking, AdminCreateBookingPayload, AdminSettings, AdminTenant, WorkbenchEntity, WorkbenchOverview } from './types';
 import { services as publicServicesOriginal } from '../data/services';
 
 import {
   type TabId,
+  formatDateBR,
   getTodayDate,
   toStringValue,
   defaultOverview,
@@ -72,19 +77,21 @@ import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 
 export default function AdminApp() {
-  const WHATSAPP_MASTER_PASSWORD = '75487319@@';
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [adminKeyInput, setAdminKeyInput] = useState('');
   const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<TabId>('dashboard');
-  const [whatsAppUnlocked, setWhatsAppUnlocked] = useState(false);
-  const [whatsAppLockModalOpen, setWhatsAppLockModalOpen] = useState(false);
-  const [whatsAppMasterInput, setWhatsAppMasterInput] = useState('');
-  const [whatsAppMasterError, setWhatsAppMasterError] = useState('');
+  const [activeTab, setActiveTab] = useState<TabId>('agenda');
+  const [unlockedProtectedTabs, setUnlockedProtectedTabs] = useState<Partial<Record<TabId, boolean>>>({});
+  const [protectedTabRequest, setProtectedTabRequest] = useState<TabId | null>(null);
+  const [protectedTabPassword, setProtectedTabPassword] = useState('');
+  const [protectedTabError, setProtectedTabError] = useState('');
+  const [protectedTabUnlocking, setProtectedTabUnlocking] = useState(false);
 
   const [dateFilter, setDateFilter] = useState(getTodayDate());
   const [dateFilterEnd, setDateFilterEnd] = useState(getTodayDate());
+  const [dateScope, setDateScope] = useState<'all' | 'range'>('all');
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
+  const [allBookings, setAllBookings] = useState<AdminBooking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
   const [rescheduleMap, setRescheduleMap] = useState<Record<number, { date: string; time: string }>>({});
@@ -143,12 +150,34 @@ export default function AdminApp() {
     [],
   );
 
+  const protectedTabs = useMemo<Partial<Record<TabId, string>>>(() => ({
+    dashboard: 'Dashboard',
+    whatsapp: 'WhatsApp',
+    analytics: 'Analytics',
+    pagamentos: 'Pagamentos',
+    profissionais: 'Colaboradores',
+    configuracoes: 'Configuracoes',
+  }), []);
+
+  const protectedTabLabel = protectedTabRequest ? protectedTabs[protectedTabRequest] || 'Area protegida' : 'Area protegida';
+  const dateFilterLabel = dateScope === 'all'
+    ? 'Visao geral'
+    : dateFilter === dateFilterEnd
+      ? formatDateBR(dateFilter)
+      : `${formatDateBR(dateFilter)} - ${formatDateBR(dateFilterEnd)}`;
+  const defaultAgendaDate = dateScope === 'all' ? getTodayDate() : dateFilter;
+
   const loadBookings = async () => {
     if (!adminKey) return;
     setBookingsLoading(true);
     setError('');
     try {
-      const rows = await listAdminBookings(dateFilter, adminKey, dateFilterEnd !== dateFilter ? dateFilterEnd : undefined);
+      const rows = await listAdminBookings(
+        adminKey,
+        dateScope === 'all'
+          ? { scope: 'all' }
+          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd },
+      );
       setBookings(rows);
       setRescheduleMap((current) => {
         const next = { ...current };
@@ -167,11 +196,27 @@ export default function AdminApp() {
     }
   };
 
+  const loadAllBookings = async () => {
+    if (!adminKey) return;
+    try {
+      const rows = await listAdminBookings(adminKey, { scope: 'all' });
+      setAllBookings(rows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao carregar historico global de agendamentos.');
+      setAllBookings([]);
+    }
+  };
+
   const loadOverview = async () => {
     if (!adminKey) return;
     setOverviewLoading(true);
     try {
-      const data = await getWorkbenchOverviewForAdmin(dateFilter, adminKey);
+      const data = await getWorkbenchOverviewForAdmin(
+        adminKey,
+        dateScope === 'all'
+          ? { scope: 'all' }
+          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd },
+      );
       setOverview(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar dashboard.');
@@ -235,8 +280,9 @@ export default function AdminApp() {
 
   const refreshAll = useCallback(() => {
     void loadBookings();
+    void loadAllBookings();
     void loadOverview();
-  }, [adminKey, activeTenant, dateFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adminKey, activeTenant, dateFilter, dateFilterEnd, dateScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useKeyboardShortcuts(useMemo(() => ({
     refresh: refreshAll,
@@ -254,10 +300,18 @@ export default function AdminApp() {
       setAdminKey('');
       setAdminKeyInput('');
       setActiveTenant(DEFAULT_TENANT_SLUG);
+      setActiveTab('agenda');
+      setDateScope('all');
       setTenants([]);
       setSettings({});
       setEntityRows(INITIAL_ENTITY_ROWS);
       setBookings([]);
+      setAllBookings([]);
+      setUnlockedProtectedTabs({});
+      setProtectedTabRequest(null);
+      setProtectedTabPassword('');
+      setProtectedTabError('');
+      setProtectedTabUnlocking(false);
       setError(customEvent.detail?.message || 'Sessao administrativa expirada. Informe a chave novamente.');
     };
 
@@ -270,13 +324,15 @@ export default function AdminApp() {
   useEffect(() => {
     if (!adminKey) return;
     void loadTenants();
+    void loadAllBookings();
+    void loadEntity('professionals');
   }, [adminKey]);
 
   useEffect(() => {
     if (!adminKey) return;
     void loadBookings();
     void loadOverview();
-  }, [adminKey, dateFilter, dateFilterEnd]);
+  }, [adminKey, dateFilter, dateFilterEnd, dateScope]);
 
   useEffect(() => {
     if (!adminKey) return;
@@ -308,6 +364,13 @@ export default function AdminApp() {
 
     sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
     setAdminKey(key);
+    setActiveTab('agenda');
+    setDateScope('all');
+    setUnlockedProtectedTabs({});
+    setProtectedTabRequest(null);
+    setProtectedTabPassword('');
+    setProtectedTabError('');
+    setProtectedTabUnlocking(false);
     setError('');
   };
 
@@ -317,52 +380,99 @@ export default function AdminApp() {
     setAdminKey('');
     setAdminKeyInput('');
     setActiveTenant(DEFAULT_TENANT_SLUG);
+    setActiveTab('agenda');
+    setDateScope('all');
     setTenants([]);
     setSettings({});
     setEntityRows(INITIAL_ENTITY_ROWS);
     setBookings([]);
-    setWhatsAppUnlocked(false);
-    setWhatsAppLockModalOpen(false);
-    setWhatsAppMasterInput('');
-    setWhatsAppMasterError('');
+    setAllBookings([]);
+    setUnlockedProtectedTabs({});
+    setProtectedTabRequest(null);
+    setProtectedTabPassword('');
+    setProtectedTabError('');
+    setProtectedTabUnlocking(false);
   };
 
   const handleOpenTab = (tabId: TabId) => {
-    if (tabId !== 'whatsapp') {
-      setActiveTab(tabId);
+    if (tabId === activeTab) {
       setSidebarOpen(false);
       return;
     }
 
-    if (whatsAppUnlocked) {
-      setActiveTab(tabId);
+    if (protectedTabs[tabId] && !unlockedProtectedTabs[tabId]) {
+      setProtectedTabRequest(tabId);
+      setProtectedTabPassword('');
+      setProtectedTabError('');
       setSidebarOpen(false);
       return;
     }
 
-    setWhatsAppMasterInput('');
-    setWhatsAppMasterError('');
-    setWhatsAppLockModalOpen(true);
+    setUnlockedProtectedTabs((current) => {
+      if (!protectedTabs[activeTab]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[activeTab];
+      return next;
+    });
+    setActiveTab(tabId);
     setSidebarOpen(false);
   };
 
-  const handleUnlockWhatsApp = () => {
-    if (whatsAppMasterInput.trim() !== WHATSAPP_MASTER_PASSWORD) {
-      setWhatsAppMasterError('Senha master invalida.');
+  const handleUnlockProtectedTab = async () => {
+    if (!protectedTabRequest || !adminKey || protectedTabUnlocking) return;
+
+    const tabToOpen = protectedTabRequest;
+    const password = protectedTabPassword.trim();
+    if (!password) {
+      setProtectedTabError('Digite a senha master.');
       return;
     }
 
-    setWhatsAppUnlocked(true);
-    setWhatsAppLockModalOpen(false);
-    setWhatsAppMasterInput('');
-    setWhatsAppMasterError('');
-    setActiveTab('whatsapp');
-    toast.success('WhatsApp desbloqueado.');
+    setProtectedTabUnlocking(true);
+    setProtectedTabError('');
+
+    try {
+      const allowed = await verifyMasterPasswordForAdmin(password, adminKey, activeTenant);
+      if (!allowed) {
+        setProtectedTabError('Senha master invalida.');
+        return;
+      }
+
+      setUnlockedProtectedTabs((current) => {
+        const next = { ...current };
+        if (protectedTabs[activeTab] && activeTab !== tabToOpen) {
+          delete next[activeTab];
+        }
+        next[tabToOpen] = true;
+        return next;
+      });
+      setProtectedTabRequest(null);
+      setProtectedTabPassword('');
+      setProtectedTabError('');
+      setActiveTab(tabToOpen);
+      toast.success(`${protectedTabs[tabToOpen] || 'Area'} liberado.`);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao validar senha master.';
+      setProtectedTabError(message);
+    } finally {
+      setProtectedTabUnlocking(false);
+    }
+  };
+
+  const closeProtectedTabModal = () => {
+    if (protectedTabUnlocking) return;
+    setProtectedTabRequest(null);
+    setProtectedTabPassword('');
+    setProtectedTabError('');
   };
 
   const withAgendaRefresh = async (callback: () => Promise<void>) => {
     await callback();
     await loadBookings();
+    await loadAllBookings();
     await loadOverview();
   };
 
@@ -459,6 +569,53 @@ export default function AdminApp() {
     }
   };
 
+  const handleAssignBookingProfessional = async (booking: AdminBooking, professionalId: number | null) => {
+    if (!adminKey) return;
+    setBusyBookingId(booking.id);
+    setError('');
+    try {
+      await withAgendaRefresh(async () => {
+        await assignProfessionalToAdminBooking(booking.id, professionalId, adminKey);
+      });
+      toast.success(professionalId ? 'Colaborador vinculado ao agendamento.' : 'Colaborador removido do agendamento.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao atualizar colaborador do agendamento.');
+      toast.error('Erro ao atualizar colaborador.');
+    } finally {
+      setBusyBookingId(null);
+    }
+  };
+
+  const handleCreateAgendaBooking = async (payload: AdminCreateBookingPayload) => {
+    if (!adminKey) return;
+    setError('');
+
+    try {
+      const created = await createAdminBooking(payload, adminKey);
+      if (payload.status === 'confirmed') {
+        await confirmAdminBooking(created.id, adminKey);
+        triggerConfetti();
+      }
+
+      await loadAllBookings();
+
+      if (dateScope !== 'all' && (payload.date < dateFilter || payload.date > dateFilterEnd)) {
+        setDateFilter(payload.date);
+        setDateFilterEnd(payload.date);
+      } else {
+        await loadBookings();
+        await loadOverview();
+      }
+
+      toast.success(payload.status === 'confirmed' ? 'Agendamento criado e confirmado.' : 'Agendamento criado na agenda.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao criar agendamento.';
+      setError(message);
+      toast.error(message);
+      throw err;
+    }
+  };
+
   const handleCreateEntity = async (entity: WorkbenchEntity, payload: Record<string, unknown>) => {
     if (!adminKey) return;
     await createWorkbenchEntityForAdmin(entity, payload, adminKey);
@@ -509,6 +666,24 @@ export default function AdminApp() {
       setError(err instanceof Error ? err.message : 'Erro ao salvar configuracoes.');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const handleUpdateMasterPassword = async (currentPassword: string, newPassword: string): Promise<boolean> => {
+    if (!adminKey) return false;
+    setError('');
+
+    try {
+      const saved = await updateMasterPasswordForAdmin({ currentPassword, newPassword }, adminKey, activeTenant);
+      setSettings(saved);
+      setUnlockedProtectedTabs({ configuracoes: true });
+      toast.success('Senha master redefinida.');
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao redefinir senha master.';
+      setError(message);
+      toast.error(message);
+      return false;
     }
   };
 
@@ -625,7 +800,7 @@ export default function AdminApp() {
                 <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
                 <span style={{ fontSize: 14.5, fontWeight: active ? 700 : 500, letterSpacing: '0.01em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                   {item.label}
-                  {item.id === 'whatsapp' && !whatsAppUnlocked && <Lock style={{ width: 13, height: 13 }} />}
+                  {protectedTabs[item.id] && !unlockedProtectedTabs[item.id] && <Lock style={{ width: 13, height: 13 }} />}
                 </span>
               </button>
             );
@@ -678,11 +853,33 @@ export default function AdminApp() {
               {tenants.length === 0 && <option value={activeTenant}>{activeTenant}</option>}
             </select>
             {(activeTab === 'dashboard' || activeTab === 'agenda' || activeTab === 'analytics') && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>De</span>
-                <input type="date" value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); if (e.target.value > dateFilterEnd) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
-                <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>Até</span>
-                <input type="date" value={dateFilterEnd} onChange={(e) => { if (e.target.value >= dateFilter) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4, borderRadius: 999, background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)' }}>
+                  <button
+                    type="button"
+                    onClick={() => setDateScope('all')}
+                    className={dateScope === 'all' ? 'admin-btn-primary' : 'admin-btn-outline'}
+                    style={{ padding: '6px 12px', fontSize: 11 }}
+                  >
+                    Geral
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDateScope('range')}
+                    className={dateScope === 'range' ? 'admin-btn-primary' : 'admin-btn-outline'}
+                    style={{ padding: '6px 12px', fontSize: 11 }}
+                  >
+                    Periodo
+                  </button>
+                </div>
+                {dateScope === 'range' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>De</span>
+                    <input type="date" value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); if (e.target.value > dateFilterEnd) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
+                    <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>Ate</span>
+                    <input type="date" value={dateFilterEnd} onChange={(e) => { if (e.target.value >= dateFilter) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -698,6 +895,8 @@ export default function AdminApp() {
               bookingsLoading={bookingsLoading}
               overviewLoading={overviewLoading}
               dateFilter={dateFilter}
+              dateScope={dateScope}
+              dateLabel={dateFilterLabel}
               stageSummary={stageSummary}
               onResetFinance={handleResetFinance}
             />
@@ -707,8 +906,8 @@ export default function AdminApp() {
             <AgendaTab
               bookings={bookings}
               bookingsLoading={bookingsLoading}
-              dateFilter={dateFilter}
-              dateFilterEnd={dateFilterEnd}
+              dateScope={dateScope}
+              dateLabel={dateFilterLabel}
               busyBookingId={busyBookingId}
               rescheduleMap={rescheduleMap}
               setRescheduleMap={setRescheduleMap}
@@ -717,6 +916,11 @@ export default function AdminApp() {
               onReject={handleRejectBooking}
               onDelete={handleDeleteBooking}
               onReschedule={handleRescheduleBooking}
+              onCreateBooking={handleCreateAgendaBooking}
+              onAssignProfessional={handleAssignBookingProfessional}
+              serviceCatalog={localServices}
+              professionals={entityRows.professionals}
+              defaultCreateDate={defaultAgendaDate}
             />
           )}
 
@@ -762,6 +966,7 @@ export default function AdminApp() {
               setSelectedProf={setSelectedProf}
               editingProf={editingProf}
               setEditingProf={setEditingProf}
+              serviceCatalog={localServices}
               onCreateEntity={handleCreateEntity}
               onUpdateEntity={handleUpdateEntity}
               onDeleteEntity={handleDeleteEntity}
@@ -798,9 +1003,12 @@ export default function AdminApp() {
           {activeTab === 'analytics' && (
             <AnalyticsTab
               bookings={bookings}
+              allBookings={allBookings}
               profs={entityRows.professionals}
+              serviceCatalog={localServices}
               analyticsSubTab={analyticsSubTab}
               setAnalyticsSubTab={setAnalyticsSubTab}
+              dateLabel={dateFilterLabel}
             />
           )}
 
@@ -819,6 +1027,7 @@ export default function AdminApp() {
               savingTenant={savingTenant}
               onCreateTenant={() => void handleCreateTenant()}
               onToggleTenantActive={(tenant) => void handleToggleTenantActive(tenant)}
+              onUpdateMasterPassword={handleUpdateMasterPassword}
             />
           )}
         </div>
@@ -829,46 +1038,49 @@ export default function AdminApp() {
         onClose={() => setRejectModal({ open: false, booking: null })}
         onConfirm={(reason) => void handleConfirmReject(reason)}
       />
-      {whatsAppLockModalOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1400, padding: 16 }}>
-          <div className="admin-card" style={{ width: '100%', maxWidth: 420, padding: 20, borderRadius: 'var(--admin-radius-lg)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-              <div style={{ width: 34, height: 34, borderRadius: 999, background: 'rgba(212,175,55,0.12)', border: '1px solid rgba(212,175,55,0.28)', display: 'grid', placeItems: 'center' }}>
-                <Lock style={{ width: 16, height: 16, color: 'var(--admin-gold, #d4af37)' }} />
+      {protectedTabRequest && (
+        <div className="admin-modal-root" style={{ zIndex: 1390 }}>
+          <div className="admin-modal-overlay" />
+          <div className="admin-modal-card admin-modal-card-sm admin-lock-modal" role="dialog" aria-modal="true">
+            <div className="admin-modal-header admin-modal-header-compact">
+              <div className="admin-modal-icon admin-modal-icon-gold">
+                <Lock style={{ width: 17, height: 17, color: 'var(--admin-gold, #d4af37)' }} />
               </div>
-              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--admin-accent)' }}>WhatsApp protegido</h3>
+              <div>
+                <h3 className="admin-modal-title">{protectedTabLabel} protegido</h3>
+                <p className="admin-modal-subtitle">Acesso restrito dentro da central administrativa.</p>
+              </div>
             </div>
-            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--admin-text-muted)' }}>Informe a senha master para liberar esta area.</p>
-            <label className="admin-label">Senha master</label>
-            <input
-              type="password"
-              value={whatsAppMasterInput}
-              onChange={(event) => {
-                setWhatsAppMasterInput(event.target.value);
-                if (whatsAppMasterError) setWhatsAppMasterError('');
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  handleUnlockWhatsApp();
-                }
-              }}
-              className="admin-input"
-              placeholder="Digite a senha master"
-              autoFocus
-            />
-            {whatsAppMasterError && <p style={{ margin: '8px 0 0', color: '#fb7185', fontSize: 12.5, fontWeight: 600 }}>{whatsAppMasterError}</p>}
-            <div style={{ marginTop: 14, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button
-                className="admin-btn-outline"
-                onClick={() => {
-                  setWhatsAppLockModalOpen(false);
-                  setWhatsAppMasterInput('');
-                  setWhatsAppMasterError('');
+            <div className="admin-modal-body">
+              <div className="admin-lock-panel">
+                <span className="admin-lock-kicker">Confirmacao obrigatoria</span>
+                <p>Digite a senha master para abrir esta aba. A liberacao vale somente enquanto esta sessao estiver ativa.</p>
+              </div>
+              <label className="admin-label">Senha master</label>
+              <input
+                type="password"
+                value={protectedTabPassword}
+                onChange={(event) => {
+                  setProtectedTabPassword(event.target.value);
+                  if (protectedTabError) setProtectedTabError('');
                 }}
-              >
-                Cancelar
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    void handleUnlockProtectedTab();
+                  }
+                }}
+                className="admin-input"
+                placeholder="Digite a senha master"
+                disabled={protectedTabUnlocking}
+                autoFocus
+              />
+              {protectedTabError && <p style={{ margin: '8px 0 0', color: '#fb7185', fontSize: 12.5, fontWeight: 700 }}>{protectedTabError}</p>}
+            </div>
+            <div className="admin-modal-footer">
+              <button className="admin-btn-outline" onClick={closeProtectedTabModal} disabled={protectedTabUnlocking}>Cancelar</button>
+              <button className="admin-btn-primary" onClick={() => void handleUnlockProtectedTab()} disabled={protectedTabUnlocking}>
+                {protectedTabUnlocking ? 'Validando...' : 'Desbloquear'}
               </button>
-              <button className="admin-btn-primary" onClick={handleUnlockWhatsApp}>Desbloquear</button>
             </div>
           </div>
         </div>

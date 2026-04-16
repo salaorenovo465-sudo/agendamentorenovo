@@ -71,12 +71,15 @@ Aplicacao React + backend Express para agendamento com:
      - `EVOLUTION_URL`, `EVOLUTION_API_KEY`, `EVOLUTION_INSTANCE`
 8. Configure CORS por allowlist:
    - `CORS_ORIGINS` (ex.: `http://localhost:3000,http://127.0.0.1:3000`)
-9. Ajuste limites de taxa para rotas de WhatsApp admin (opcional):
+9. Frontend e API:
+   - em desenvolvimento, use `VITE_DEV_API_PROXY_TARGET` (padrão: `http://localhost:3001`)
+   - defina `VITE_API_URL` apenas quando frontend e backend estiverem em domínios diferentes
+10. Ajuste limites de taxa para rotas de WhatsApp admin (opcional):
    - `WHATSAPP_CONTROL_RATE_LIMIT_WINDOW_MS`
    - `WHATSAPP_CONTROL_RATE_LIMIT_MAX`
    - `WHATSAPP_SEND_RATE_LIMIT_WINDOW_MS`
    - `WHATSAPP_SEND_RATE_LIMIT_MAX`
-10. Aplique todas as migrations no banco remoto:
+11. Aplique todas as migrations no banco remoto:
    `npx supabase db push`
 
 ### Trocar para outra conta Supabase

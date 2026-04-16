@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 interface BookingData {
   service: string;
   servicePrice: string;
+  selectedServices: { category: string; name: string; price: string }[];
   date: string;
   time: string;
   name: string;
@@ -36,15 +37,15 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   return (
-    <div className="bg-luxury-light/80 rounded-2xl border border-luxury-dark/8 p-5">
+    <div className="booking-calendar-panel bg-luxury-light/80 border border-luxury-dark/8 p-4 sm:p-5">
       <div className="flex justify-between items-center mb-5">
-        <button type="button" onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-full border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
+        <button type="button" onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-lg border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
           <ChevronLeft className="w-4 h-4" />
         </button>
         <span className="font-serif text-xl font-medium text-luxury-dark tracking-wide">
           {monthNames[month]} <span className="text-luxury-gold">{year}</span>
         </span>
-        <button type="button" onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-full border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
+        <button type="button" onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-lg border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>

@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { bookingStore } from '../db/bookingStore';
 import { inboxStore } from '../db/inboxStore';
 import { workbenchStore } from '../db/workbenchStore';
+import type { BookingServiceItem } from '../types';
 import {
   calendarConfig,
   fetchBusySlotsFromCalendarApi,
@@ -17,6 +18,32 @@ import {
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}$/;
+
+const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      if (!name) {
+        return null;
+      }
+
+      return {
+        category: typeof row.category === 'string' ? row.category.trim() : '',
+        name,
+        price: typeof row.price === 'string' ? row.price.trim() : '',
+      } satisfies BookingServiceItem;
+    })
+    .filter((item): item is BookingServiceItem => Boolean(item));
+};
 
 /**
  * Check availability rules for a given date.
@@ -151,6 +178,7 @@ publicRoutes.get('/availability', async (req, res) => {
 
 publicRoutes.post('/bookings', async (req, res) => {
   const { service, servicePrice, date, time, name, phone } = req.body;
+  const serviceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
 
   if (!service || !date || !time || !name || !phone) {
     return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
@@ -188,6 +216,7 @@ publicRoutes.post('/bookings', async (req, res) => {
     const booking = await bookingStore.create({
       service: String(service),
       servicePrice: typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null,
+      serviceItems,
       date,
       time,
       name: String(name),

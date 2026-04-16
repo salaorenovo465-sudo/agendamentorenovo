@@ -1,8 +1,24 @@
 import type { WorkbenchEntity, WorkbenchOverview } from '../types';
 import { requestAdmin } from './apiCore';
 
-export const getWorkbenchOverviewForAdmin = async (date: string, adminKey: string): Promise<WorkbenchOverview> =>
-  requestAdmin<WorkbenchOverview>(`/api/admin/workbench/overview?date=${date}`, adminKey, { method: 'GET' });
+export const getWorkbenchOverviewForAdmin = async (
+  adminKey: string,
+  filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string },
+): Promise<WorkbenchOverview> => {
+  const params = new URLSearchParams();
+  if (filters?.scope === 'all') {
+    params.set('scope', 'all');
+  } else if (filters?.startDate) {
+    params.set('date', filters.startDate);
+    if (filters.endDate && filters.endDate !== filters.startDate) {
+      params.set('endDate', filters.endDate);
+    }
+  }
+
+  const query = params.toString();
+  const url = query ? `/api/admin/workbench/overview?${query}` : '/api/admin/workbench/overview';
+  return requestAdmin<WorkbenchOverview>(url, adminKey, { method: 'GET' });
+};
 
 export const listWorkbenchEntityForAdmin = async (
   entity: WorkbenchEntity,

@@ -28,10 +28,74 @@ import {
   notifyCustomerRescheduledBooking,
 } from '../services/notificationService';
 import { logoutEvolutionInstance } from '../services/evolutionInstanceService';
+import type { BookingServiceItem } from '../types';
 import { toPositiveInt, parseId as parseBookingId, getTodayDate } from '../utils/helpers';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}(:\d{2})?$/;
+
+const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== 'object') {
+        return null;
+      }
+
+      const row = item as Record<string, unknown>;
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      if (!name) {
+        return null;
+      }
+
+      return {
+        category: typeof row.category === 'string' ? row.category.trim() : '',
+        name,
+        price: typeof row.price === 'string' ? row.price.trim() : '',
+      } satisfies BookingServiceItem;
+    })
+    .filter((item): item is BookingServiceItem => Boolean(item));
+};
+
+const parseOptionalProfessionalId = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+};
+
+const resolveProfessionalSelection = async (
+  professionalId: number | null,
+): Promise<{ professionalId: number | null; professionalName: string | null }> => {
+  if (!professionalId) {
+    return { professionalId: null, professionalName: null };
+  }
+
+  const rows = await workbenchStore.list('professionals');
+  const match = rows.find((row) => Number(row.id) === professionalId);
+  if (!match) {
+    throw new Error('Colaborador selecionado nao foi encontrado.');
+  }
+
+  const name = typeof match.name === 'string' ? match.name.trim() : '';
+  if (!name) {
+    throw new Error('Colaborador selecionado nao possui nome valido.');
+  }
+
+  return {
+    professionalId,
+    professionalName: name,
+  };
+};
 
 const whatsappControlRateLimit = createRateLimit({
   windowMs: toPositiveInt(process.env.WHATSAPP_CONTROL_RATE_LIMIT_WINDOW_MS, 60_000),
@@ -109,6 +173,88 @@ adminRoutes.get('/bookings', async (req, res) => {
   }
 });
 
+adminRoutes.post('/bookings', async (req, res) => {
+  const { service, servicePrice, date, time, name, phone } = req.body || {};
+  const serviceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
+  const professionalId = parseOptionalProfessionalId(req.body?.professionalId);
+
+  if (!service || !date || !time || !name || !phone) {
+    return res.status(400).json({ error: 'Todos os campos sao obrigatorios.' });
+  }
+
+  if (typeof date !== 'string' || !DATE_REGEX.test(date)) {
+    return res.status(400).json({ error: 'Data invalida. Use YYYY-MM-DD.' });
+  }
+
+  if (typeof time !== 'string' || !TIME_REGEX.test(time)) {
+    return res.status(400).json({ error: 'Horario invalido. Use HH:mm.' });
+  }
+
+  try {
+    const professionalSelection = await resolveProfessionalSelection(professionalId);
+    const booking = await bookingStore.create({
+      service: String(service).trim(),
+      servicePrice: typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null,
+      serviceItems,
+      date,
+      time: time.slice(0, 5),
+      name: String(name).trim(),
+      phone: String(phone).trim(),
+      professionalId: professionalSelection.professionalId,
+      professionalName: professionalSelection.professionalName,
+    });
+
+    const thread = await inboxStore.ensureThread(booking.phone, booking.name);
+    const normalizedBooking =
+      (await bookingStore.updateWhatsappThread({ id: booking.id, whatsappThreadId: thread.id })) || booking;
+
+    return res.status(201).json({
+      message: 'Agendamento criado com sucesso.',
+      booking: normalizedBooking,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao criar agendamento administrativo.';
+    console.error('Erro ao criar agendamento administrativo:', error);
+    return res.status(500).json({ error: message });
+  }
+});
+
+adminRoutes.post('/bookings/:id/professional', async (req, res) => {
+  const bookingId = parseBookingId(req.params.id);
+  if (!bookingId) {
+    return res.status(400).json({ error: 'ID de agendamento invalido.' });
+  }
+
+  const professionalId = parseOptionalProfessionalId(req.body?.professionalId);
+
+  try {
+    const booking = await bookingStore.getById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: 'Agendamento nao encontrado.' });
+    }
+
+    if (!professionalId && booking.status !== 'pending') {
+      return res.status(400).json({ error: 'Um agendamento fora de pendente precisa manter um colaborador definido.' });
+    }
+
+    const professionalSelection = await resolveProfessionalSelection(professionalId);
+    const updatedBooking = await bookingStore.updateProfessional({
+      id: bookingId,
+      professionalId: professionalSelection.professionalId,
+      professionalName: professionalSelection.professionalName,
+    });
+
+    return res.json({
+      message: professionalSelection.professionalId ? 'Colaborador vinculado com sucesso.' : 'Colaborador removido do agendamento.',
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao atualizar colaborador do agendamento.';
+    console.error('Erro ao atualizar colaborador do agendamento:', error);
+    return res.status(500).json({ error: message });
+  }
+});
+
 adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
   const bookingId = parseBookingId(req.params.id);
   if (!bookingId) {
@@ -119,6 +265,10 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
     const booking = await bookingStore.getById(bookingId);
     if (!booking) {
       return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    }
+
+    if (!booking.professionalId || !booking.professionalName) {
+      return res.status(400).json({ error: 'Selecione o colaborador responsavel antes de confirmar este agendamento.' });
     }
 
     const conflict = await bookingStore.hasConflict(booking.date, booking.time, booking.id);
@@ -141,6 +291,10 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
         });
       }
       throw error;
+    }
+
+    if (!booking.professionalId || !booking.professionalName) {
+      return res.status(400).json({ error: 'Selecione o colaborador responsavel antes de finalizar este atendimento.' });
     }
 
     const updatedBooking = await bookingStore.updateStatus({

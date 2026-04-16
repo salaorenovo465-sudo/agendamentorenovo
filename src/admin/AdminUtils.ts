@@ -121,14 +121,16 @@ export const ENTITY_FIELDS: Record<WorkbenchEntity, FieldConfig[]> = {
   ],
   professionals: [
     { key: 'name', label: 'Nome', type: 'text', required: true },
+    { key: 'phone', label: 'Telefone', type: 'text' },
     { key: 'cpf', label: 'CPF', type: 'text' },
     { key: 'birth_date', label: 'Data de Nascimento', type: 'date' },
     { key: 'email', label: 'Email', type: 'text' },
     { key: 'address', label: 'Endereco', type: 'text' },
+    { key: 'notes', label: 'Observacoes', type: 'textarea' },
     { key: 'specialties', label: 'Especialidades', type: 'text' },
     { key: 'work_start', label: 'Inicio jornada', type: 'time' },
     { key: 'work_end', label: 'Fim jornada', type: 'time' },
-    { key: 'commission', label: 'Comissao (%)', type: 'number' },
+    { key: 'base_commission', label: 'Comissao base (%)', type: 'number' },
     { key: 'active', label: 'Ativo', type: 'checkbox' },
   ],
   finance: [

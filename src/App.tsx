@@ -2,12 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { services } from './data/services';
 import HeroSection from './components/HeroSection';
 import BookingModal from './components/BookingModal';
-
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+import { apiUrl } from './apiBase';
 
 const fetchBookedSlotsForDate = async (dateStr: string): Promise<string[]> => {
   try {
-    const response = await fetch(`${API_URL}/api/availability?date=${dateStr}`);
+    const response = await fetch(apiUrl(`/api/availability?date=${encodeURIComponent(dateStr)}`));
     if (!response.ok) {
       if (response.status === 500) return []; // Possivelmente sem tokens ainda
       throw new Error('Falha ao buscar agenda');
@@ -24,13 +23,54 @@ const WHATSAPP_NUMBER = "5571999542265"; // Empresa Estúdio Renovo
 
 const allServicesFlat = services.flatMap(c => c.items);
 
+type SelectedBookingService = {
+  category: string;
+  name: string;
+  price: string;
+};
+
+type BookingData = {
+  service: string;
+  servicePrice: string;
+  selectedServices: SelectedBookingService[];
+  date: string;
+  time: string;
+  name: string;
+  phone: string;
+};
+
+const parseServiceAmount = (price: string): number => {
+  const match = price.match(/[\d.]+(?:,\d{2})?|\d+(?:\.\d{2})?/);
+  if (!match) return 0;
+  return Number(match[0].replace(/\.(?=\d{3})/g, '').replace(',', '.')) || 0;
+};
+
+const summarizeServiceSelection = (selectedServices: SelectedBookingService[]): { service: string; servicePrice: string } => {
+  if (selectedServices.length === 0) {
+    return { service: '', servicePrice: '' };
+  }
+
+  const service = selectedServices.map((item) => item.name).join(' + ');
+  const total = selectedServices.reduce((sum, item) => sum + parseServiceAmount(item.price), 0);
+  const hasConsult = selectedServices.some((item) => item.price.toLowerCase().includes('sob consulta') || parseServiceAmount(item.price) === 0);
+  const totalLabel = total > 0
+    ? `Total estimado ${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`
+    : 'Sob consulta';
+
+  return {
+    service,
+    servicePrice: hasConsult && total > 0 ? `${totalLabel} + itens sob consulta` : totalLabel,
+  };
+};
+
 export default function App() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [step, setStep] = useState(1);
-  const [bookingData, setBookingData] = useState({
+  const [bookingData, setBookingData] = useState<BookingData>({
     service: "",
     servicePrice: "",
+    selectedServices: [],
     date: "",
     time: "",
     name: "",
@@ -70,7 +110,7 @@ export default function App() {
     setTimeout(() => {
       setStep(1);
       setSelectedCategory("");
-      setBookingData({ service: "", servicePrice: "", date: "", time: "", name: "", phone: "" });
+      setBookingData({ service: "", servicePrice: "", selectedServices: [], date: "", time: "", name: "", phone: "" });
       setBookingSuccess(false);
       setIsSubmitting(false);
     }, 300);
@@ -81,14 +121,21 @@ export default function App() {
     setIsSubmitting(true);
     setBookingError('');
 
+    const selectionSummary = summarizeServiceSelection(bookingData.selectedServices);
     const selectedServicePrice =
-      bookingData.servicePrice || allServicesFlat.find(item => item.name === bookingData.service)?.price || 'Sob consulta';
+      selectionSummary.servicePrice || bookingData.servicePrice || allServicesFlat.find(item => item.name === bookingData.service)?.price || 'Sob consulta';
+    const selectedServiceName = selectionSummary.service || bookingData.service;
 
     try {
-      const response = await fetch(`${API_URL}/api/bookings`, {
+      const response = await fetch(apiUrl('/api/bookings'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...bookingData, servicePrice: selectedServicePrice }),
+        body: JSON.stringify({
+          ...bookingData,
+          service: selectedServiceName,
+          servicePrice: selectedServicePrice,
+          serviceItems: bookingData.selectedServices,
+        }),
       });
 
       if (!response.ok) {
@@ -110,7 +157,12 @@ export default function App() {
       setBookingSuccess(true);
     } catch (error) {
       console.error('Erro ao gravar na agenda:', error);
-      const msg = error instanceof Error ? error.message : 'Não foi possível registrar o agendamento agora. Tente novamente.';
+      const isNetworkError = error instanceof TypeError && /failed to fetch/i.test(error.message);
+      const msg = isNetworkError
+        ? 'Não foi possível conectar ao servidor de agendamento. Tente novamente em instantes.'
+        : error instanceof Error
+          ? error.message
+          : 'Não foi possível registrar o agendamento agora. Tente novamente.';
       setBookingError(msg);
       setTimeout(() => setBookingError(''), 5000);
     } finally {
@@ -140,7 +192,6 @@ export default function App() {
         bookingSuccess={bookingSuccess}
         bookingError={bookingError}
         isSubmitting={isSubmitting}
-        allServicesFlat={allServicesFlat}
         handleCloseModal={handleCloseModal}
         handleConfirmBooking={handleConfirmBooking}
       />

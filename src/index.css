@@ -221,6 +221,170 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   margin: 0 -2rem;
 }
 
+/* Booking modal layout */
+.booking-modal-shell {
+  max-width: min(920px, calc(100vw - 1rem));
+  max-height: min(92vh, 860px);
+  border-radius: 24px;
+  border: 1px solid rgba(194, 166, 121, 0.16);
+}
+
+.booking-modal-header {
+  flex-shrink: 0;
+}
+
+.booking-modal-body {
+  padding: clamp(1rem, 2.8vw, 2rem);
+  background:
+    linear-gradient(180deg, rgba(249, 247, 243, 0.34), rgba(255, 255, 255, 0) 22%),
+    #ffffff;
+}
+
+.booking-stepper {
+  margin-bottom: clamp(1.25rem, 3vw, 2.25rem);
+}
+
+.booking-service-panel,
+.booking-summary-card,
+.booking-calendar-panel,
+.booking-time-panel {
+  border-radius: 16px;
+}
+
+.booking-service-panel {
+  padding: clamp(1rem, 2.2vw, 1.25rem);
+  margin-bottom: 1.25rem;
+}
+
+.booking-multi-summary {
+  min-height: 43px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.75rem;
+  background: rgba(249, 247, 242, 0.78);
+  border: 1px solid rgba(194, 166, 121, 0.16);
+}
+
+.booking-multi-summary strong {
+  color: #2f281f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.booking-multi-summary span {
+  color: rgba(117, 100, 82, 0.78);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.booking-service-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.booking-service-option {
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.35rem 0.65rem;
+  padding: 0.78rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(47, 40, 31, 0.08);
+  background: rgba(255,255,255,0.72);
+  text-align: left;
+  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease, background 220ms ease;
+}
+
+.booking-service-option:hover,
+.booking-service-option.active {
+  transform: translateY(-1px);
+  border-color: rgba(194, 166, 121, 0.42);
+  background: #fff;
+  box-shadow: 0 14px 28px -24px rgba(47, 40, 31, 0.48);
+}
+
+.booking-service-option span {
+  color: #2f281f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.booking-service-option small {
+  grid-column: 1 / -1;
+  color: rgba(117, 100, 82, 0.75);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.booking-service-empty {
+  grid-column: 1 / -1;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  border: 1px dashed rgba(194, 166, 121, 0.24);
+  color: rgba(117, 100, 82, 0.75);
+  background: rgba(249, 247, 242, 0.55);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.booking-selected-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.booking-selected-services button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 0.65rem;
+  border-radius: 999px;
+  color: #2f281f;
+  background: rgba(194, 166, 121, 0.1);
+  border: 1px solid rgba(194, 166, 121, 0.2);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.booking-modal-footer {
+  flex-shrink: 0;
+  box-shadow: 0 -12px 28px -28px rgba(28, 24, 21, 0.35);
+}
+
+@media (max-width: 640px) {
+  .booking-modal-shell {
+    max-width: 100%;
+    max-height: calc(100dvh - 1rem);
+    border-radius: 18px;
+  }
+
+  .booking-modal-body {
+    padding: 1rem;
+  }
+
+  .booking-service-panel {
+    top: -1px;
+    border-radius: 14px;
+  }
+
+  .booking-modal-footer {
+    align-items: stretch;
+  }
+
+  .booking-modal-footer button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
 /* Pulse CTA animation */
 .pulse-cta {
   animation: pulse-cta 2s ease-in-out infinite;

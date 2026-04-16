@@ -1,10 +1,28 @@
-import type { AdminBooking } from '../types';
+import { apiUrl } from '../../apiBase';
+import type { AdminBooking, AdminCreateBookingPayload } from '../types';
 import { requestAdmin } from './apiCore';
 
-export const listAdminBookings = async (date: string, adminKey: string, endDate?: string): Promise<AdminBooking[]> => {
-  const url = endDate
-    ? `/api/admin/bookings?date=${date}&endDate=${endDate}`
-    : `/api/admin/bookings?date=${date}`;
+type BookingAvailability = {
+  busySlots: string[];
+  limitReached?: boolean;
+};
+
+export const listAdminBookings = async (
+  adminKey: string,
+  filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string },
+): Promise<AdminBooking[]> => {
+  const params = new URLSearchParams();
+  if (filters?.scope === 'all') {
+    params.set('scope', 'all');
+  } else if (filters?.startDate) {
+    params.set('date', filters.startDate);
+    if (filters.endDate && filters.endDate !== filters.startDate) {
+      params.set('endDate', filters.endDate);
+    }
+  }
+
+  const query = params.toString();
+  const url = query ? `/api/admin/bookings?${query}` : '/api/admin/bookings';
   const response = await requestAdmin<{ bookings: AdminBooking[] }>(url, adminKey);
   return response.bookings;
 };
@@ -13,6 +31,45 @@ export const deleteAdminBooking = async (id: number, adminKey: string): Promise<
   await requestAdmin<{ message: string }>(`/api/admin/bookings/${id}`, adminKey, {
     method: 'DELETE',
   });
+};
+
+export const getBookingAvailability = async (date: string): Promise<BookingAvailability> => {
+  const response = await fetch(apiUrl(`/api/availability?date=${encodeURIComponent(date)}`));
+  if (!response.ok) {
+    let message = `Erro ${response.status}`;
+    try {
+      const body = (await response.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      // noop
+    }
+    throw new Error(message);
+  }
+  return (await response.json()) as BookingAvailability;
+};
+
+export const createAdminBooking = async (
+  payload: AdminCreateBookingPayload,
+  adminKey: string,
+): Promise<AdminBooking> => {
+  const { status: _status, ...bookingPayload } = payload;
+  const response = await requestAdmin<{ booking: AdminBooking; message: string }>('/api/admin/bookings', adminKey, {
+    method: 'POST',
+    body: JSON.stringify(bookingPayload),
+  });
+  return response.booking;
+};
+
+export const assignProfessionalToAdminBooking = async (
+  id: number,
+  professionalId: number | null,
+  adminKey: string,
+): Promise<AdminBooking> => {
+  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/professional`, adminKey, {
+    method: 'POST',
+    body: JSON.stringify({ professionalId }),
+  });
+  return response.booking;
 };
 
 export const completeAdminBooking = async (id: number, adminKey: string): Promise<AdminBooking> => {

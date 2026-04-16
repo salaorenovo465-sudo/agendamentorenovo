@@ -3,6 +3,9 @@ export { requestAdmin, withTenantQuery, API_BASE } from './apiCore';
 
 export {
   listAdminBookings,
+  createAdminBooking,
+  assignProfessionalToAdminBooking,
+  getBookingAvailability,
   deleteAdminBooking,
   completeAdminBooking,
   confirmAdminBooking,
@@ -61,6 +64,8 @@ export {
 export {
   getAdminSettings,
   saveAdminSettings,
+  verifyMasterPasswordForAdmin,
+  updateMasterPasswordForAdmin,
   listAdminTenants,
   createAdminTenant,
   updateAdminTenant,
