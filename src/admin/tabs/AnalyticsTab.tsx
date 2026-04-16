@@ -75,7 +75,7 @@ function CollaboratorAnalyticsModal({
   }, [overall.serviceBreakdown, period.serviceBreakdown]);
 
   return (
-    <div className="admin-modal-root" style={{ zIndex: 1400 }}>
+    <div className="admin-modal-root collaborator-modal-root" style={{ zIndex: 1400 }}>
       <div className="admin-modal-overlay" onClick={onClose} />
       <div className="admin-modal-card analytics-collaborator-modal" role="dialog" aria-modal="true">
         <div className="admin-modal-header">

@@ -84,7 +84,7 @@ function CollaboratorEditorModal({
   };
 
   return (
-    <div className="admin-modal-root admin-modal-root-start" style={{ zIndex: 1400 }}>
+    <div className="admin-modal-root collaborator-modal-root" style={{ zIndex: 1400 }}>
       <div className="admin-modal-overlay" onClick={onClose} />
       <div className="admin-modal-card collaborator-modal-card" role="dialog" aria-modal="true">
         <div className="admin-modal-header collaborator-modal-header">
