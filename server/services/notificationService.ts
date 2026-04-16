@@ -2,7 +2,7 @@ import { inboxStore } from '../db/inboxStore';
 import { bookingStore } from '../db/bookingStore';
 import type { BookingRecord } from '../types';
 
-import { sendWhatsappMessageToCustomer, sendWhatsappMessageToSalon } from './whatsappService';
+import { sendWhatsappMessageToCustomer, sendWhatsappMessageToSalon, whatsappConfig } from './whatsappService';
 
 const formatBookingDate = (date: string): string => date.split('-').reverse().join('/');
 
@@ -31,6 +31,8 @@ const safeRun = async (label: string, callback: () => Promise<void>): Promise<bo
   }
 };
 
+const isWhatsappNotificationsEnabled = (): boolean => whatsappConfig.isConfigured;
+
 const ensureThreadId = async (booking: BookingRecord): Promise<number | null> => {
   if (booking.whatsappThreadId) {
     return booking.whatsappThreadId;
@@ -46,6 +48,10 @@ const ensureThreadId = async (booking: BookingRecord): Promise<number | null> =>
 };
 
 const sendAndTrackCustomerMessage = async (booking: BookingRecord, message: string): Promise<void> => {
+  if (!isWhatsappNotificationsEnabled()) {
+    return;
+  }
+
   const threadId = await ensureThreadId(booking);
   let providerMessageId: string | null = null;
 
@@ -67,6 +73,10 @@ const sendAndTrackCustomerMessage = async (booking: BookingRecord, message: stri
 };
 
 export const notifySalonNewBooking = async (booking: BookingRecord): Promise<void> => {
+  if (!isWhatsappNotificationsEnabled()) {
+    return;
+  }
+
   const prettyDate = formatBookingDate(booking.date);
   const price = booking.servicePrice || 'Sob consulta';
 
@@ -219,6 +229,10 @@ export const notifyCustomerCancelledBooking = async (booking: BookingRecord): Pr
  * Returns true if a cancellation was processed.
  */
 export const handleClientCancellationRequest = async (phone: string, text: string): Promise<boolean> => {
+  if (!isWhatsappNotificationsEnabled()) {
+    return false;
+  }
+
   const normalizedText = text.toLowerCase().trim();
 
   // Check if the message contains cancellation intent

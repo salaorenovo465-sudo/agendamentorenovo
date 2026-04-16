@@ -76,6 +76,8 @@ import { DisponibilidadeTab } from './tabs/DisponibilidadeTab';
 import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 
+const WHATSAPP_WORKSPACE_ENABLED = import.meta.env.VITE_WHATSAPP_WORKSPACE_ENABLED === 'true';
+
 export default function AdminApp() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [adminKeyInput, setAdminKeyInput] = useState('');
@@ -136,7 +138,7 @@ export default function AdminApp() {
     () => [
       { id: 'dashboard' as TabId, label: 'Dashboard', icon: LayoutDashboard },
       { id: 'agenda' as TabId, label: 'Agenda', icon: Calendar },
-      { id: 'whatsapp' as TabId, label: 'WhatsApp', icon: MessageSquare },
+      ...(WHATSAPP_WORKSPACE_ENABLED ? [{ id: 'whatsapp' as TabId, label: 'WhatsApp', icon: MessageSquare }] : []),
       { id: 'clientes' as TabId, label: 'Clientes', icon: Users },
       { id: 'servicos' as TabId, label: 'Servicos', icon: Sparkles },
       { id: 'profissionais' as TabId, label: 'Colaboradores', icon: UserCircle2 },
@@ -998,7 +1000,9 @@ export default function AdminApp() {
 
           {activeTab === 'pagamentos' && <PaymentConfirmationTab adminKey={adminKey} />}
 
-          {activeTab === 'whatsapp' && <WhatsAppWorkspace adminKey={adminKey} settings={settings} tenantSlug={activeTenant} />}
+          {WHATSAPP_WORKSPACE_ENABLED && activeTab === 'whatsapp' && (
+            <WhatsAppWorkspace adminKey={adminKey} settings={settings} tenantSlug={activeTenant} />
+          )}
 
           {activeTab === 'analytics' && (
             <AnalyticsTab

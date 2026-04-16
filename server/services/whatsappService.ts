@@ -21,7 +21,8 @@ import {
   setOutgoingDeliveryStatus,
 } from './whatsappDeliveryStatus';
 
-const BAILEYS_ENABLED = process.env.BAILEYS_ENABLED !== 'false';
+const WHATSAPP_FEATURE_ENABLED = process.env.WHATSAPP_FEATURE_ENABLED === 'true';
+const BAILEYS_ENABLED = WHATSAPP_FEATURE_ENABLED && process.env.BAILEYS_ENABLED !== 'false';
 const DEFAULT_BAILEYS_AUTH_DIR = path.resolve(os.homedir(), '.agendamentorenovo', 'baileys_auth');
 const BAILEYS_AUTH_DIR = process.env.BAILEYS_AUTH_DIR || DEFAULT_BAILEYS_AUTH_DIR;
 const BAILEYS_AUTO_CONNECT = process.env.BAILEYS_AUTO_CONNECT !== 'false';
@@ -303,7 +304,7 @@ const ensureAuthDir = (): void => {
 
 export const connectWhatsapp = async (): Promise<void> => {
   if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: 'BAILEYS_ENABLED=false' });
+    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
     return;
   }
 
@@ -413,7 +414,7 @@ export const logoutWhatsapp = async (): Promise<void> => {
 
 export const initializeWhatsapp = async (): Promise<void> => {
   if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: 'BAILEYS_ENABLED=false' });
+    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
     return;
   }
 
@@ -652,5 +653,6 @@ export const getWhatsappStatus = () => ({
 });
 
 export const whatsappConfig = {
+  featureEnabled: WHATSAPP_FEATURE_ENABLED,
   isConfigured: BAILEYS_ENABLED,
 };
