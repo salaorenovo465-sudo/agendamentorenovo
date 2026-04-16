@@ -79,10 +79,19 @@ const isValidEntity = (value: string): value is WorkbenchEntity => ENTITIES.incl
 export const adminWorkbenchRoutes = Router();
 
 adminWorkbenchRoutes.get('/overview', async (req, res) => {
-  const date = typeof req.query.date === 'string' && DATE_REGEX.test(req.query.date) ? req.query.date : getTodayDate();
+  const scope = req.query.scope === 'all' ? 'all' : 'range';
+  const startDate = typeof req.query.date === 'string' && DATE_REGEX.test(req.query.date) ? req.query.date : getTodayDate();
+  const endDate = typeof req.query.endDate === 'string' && DATE_REGEX.test(req.query.endDate) ? req.query.endDate : null;
 
   try {
-    const overview = await workbenchStore.getOverview(date);
+    const overview = await workbenchStore.getOverview(
+      scope === 'all'
+        ? undefined
+        : {
+            startDate,
+            endDate: endDate || startDate,
+          },
+    );
     return res.json(overview);
   } catch (error) {
     console.error('Erro ao carregar overview do workbench:', error);

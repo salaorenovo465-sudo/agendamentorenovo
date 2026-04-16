@@ -434,9 +434,16 @@ class WorkbenchStore {
     return (data || []).length;
   }
 
-  async getOverview(date: string): Promise<OverviewData> {
+  async getOverview(filters?: { startDate?: string; endDate?: string }): Promise<OverviewData> {
     const supabase = this.getSupabase();
-    const bookings = await bookingStore.listByDate(date);
+    const startDate = filters?.startDate?.trim() || null;
+    const endDate = filters?.endDate?.trim() || null;
+    const hasDateFilter = Boolean(startDate);
+    const bookings = !hasDateFilter
+      ? await bookingStore.listAll()
+      : endDate && endDate !== startDate
+        ? await bookingStore.listByDateRange(startDate, endDate)
+        : await bookingStore.listByDate(startDate);
 
     const bookingStats = {
       total: bookings.length,
@@ -463,10 +470,16 @@ class WorkbenchStore {
 
     const pendingTasks = (tasks || []).filter((task) => String((task as { status?: string }).status || '') !== 'concluida').length;
 
-    const { data: financeRows, error: financeError } = await supabase
+    let financeQuery = supabase
       .from('financial_entries')
-      .select('amount,status,due_date,paid_at')
-      .eq('due_date', date);
+      .select('amount,status,due_date,paid_at');
+
+    if (startDate) {
+      financeQuery = financeQuery.gte('due_date', startDate);
+      financeQuery = financeQuery.lte('due_date', endDate || startDate);
+    }
+
+    const { data: financeRows, error: financeError } = await financeQuery;
 
     if (financeError) {
       throw financeError;
@@ -478,7 +491,7 @@ class WorkbenchStore {
       .reduce((sum, item) => sum + Number((item as { amount?: number }).amount || 0), 0);
 
     return {
-      date,
+      date: startDate || 'all',
       bookingStats,
       leads: {
         total: (leads || []).length,

@@ -182,6 +182,25 @@ class BookingStore {
     return rows.map(mapSqliteBooking);
   }
 
+  async listAll(): Promise<BookingRecord[]> {
+    if (this.supabaseEnabled && this.supabase) {
+      const { data, error } = await this.supabase
+        .from('bookings')
+        .select('*')
+        .order('date', { ascending: true })
+        .order('time', { ascending: true });
+
+      if (error) throw error;
+      return (data || []).map((row) => mapSupabaseBooking(row as Record<string, unknown>));
+    }
+
+    const rows = this.sqlite
+      .prepare('SELECT * FROM bookings ORDER BY date ASC, time ASC')
+      .all() as Record<string, unknown>[];
+
+    return rows.map(mapSqliteBooking);
+  }
+
   async listByDateRange(startDate: string, endDate: string): Promise<BookingRecord[]> {
     if (this.supabaseEnabled && this.supabase) {
       const { data, error } = await this.supabase

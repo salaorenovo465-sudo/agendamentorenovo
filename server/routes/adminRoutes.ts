@@ -92,14 +92,17 @@ adminRoutes.get('/inbox/stream', (req, res) => {
 });
 
 adminRoutes.get('/bookings', async (req, res) => {
+  const scope = req.query.scope === 'all' ? 'all' : 'range';
   const date = typeof req.query.date === 'string' && DATE_REGEX.test(req.query.date) ? req.query.date : getTodayDate();
   const endDate = typeof req.query.endDate === 'string' && DATE_REGEX.test(req.query.endDate) ? req.query.endDate : null;
 
   try {
-    const bookings = endDate
-      ? await bookingStore.listByDateRange(date, endDate)
-      : await bookingStore.listByDate(date);
-    return res.json({ date, bookings });
+    const bookings = scope === 'all'
+      ? await bookingStore.listAll()
+      : endDate
+        ? await bookingStore.listByDateRange(date, endDate)
+        : await bookingStore.listByDate(date);
+    return res.json({ date: scope === 'all' ? null : date, endDate: scope === 'all' ? null : endDate, scope, bookings });
   } catch (error) {
     console.error('Erro ao listar agendamentos do admin:', error);
     return res.status(500).json({ error: 'Erro ao listar agendamentos.' });
