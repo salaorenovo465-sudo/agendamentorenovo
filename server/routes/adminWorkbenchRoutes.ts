@@ -12,7 +12,10 @@ const BASIC_PLATFORM_SETTINGS_KEYS = [
   'cancelPolicy',
   'whatsappOpenTime',
   'whatsappCloseTime',
+  'masterPasswordUpdatedAt',
 ] as const;
+
+const MASTER_PASSWORD_MIN_LENGTH = 4;
 
 const pickBasicPlatformSettings = (value: Record<string, unknown>): Record<string, unknown> => {
   const picked: Record<string, unknown> = {};
@@ -43,6 +46,20 @@ const parseTenantFromQuery = (value: unknown): string | null => {
   }
 
   return normalized;
+};
+
+const getPayloadString = (payload: Record<string, unknown>, key: string): string =>
+  typeof payload[key] === 'string' ? payload[key].trim() : '';
+
+const getRequestFallbackMasterPassword = (req: { headers: Record<string, unknown> }): string => {
+  const adminHeader = req.headers['x-admin-key'];
+  const adminKey = Array.isArray(adminHeader) ? adminHeader[0] : adminHeader;
+  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || (typeof adminKey === 'string' ? adminKey.trim() : '');
+};
+
+const resolveMasterPassword = (settings: Record<string, unknown>, fallbackPassword: string): string => {
+  const configured = typeof settings.masterPassword === 'string' ? settings.masterPassword.trim() : '';
+  return configured || fallbackPassword;
 };
 
 const ENTITIES: WorkbenchEntity[] = [
@@ -92,6 +109,83 @@ adminWorkbenchRoutes.get('/settings', async (req, res) => {
       return res.status(503).json({ error: (error as Error).message });
     }
     return res.status(500).json({ error: 'Erro ao carregar configurações.' });
+  }
+});
+
+adminWorkbenchRoutes.post('/settings/master-password/verify', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  if (!payload) {
+    return res.status(400).json({ error: 'Payload invalido para validar senha master.' });
+  }
+
+  const password = getPayloadString(payload, 'password');
+  if (!password) {
+    return res.status(400).json({ error: 'Informe a senha master.' });
+  }
+
+  try {
+    const settings = await workbenchStore.getSettings(tenant || undefined);
+    return res.json({ ok: password === resolveMasterPassword(settings, getRequestFallbackMasterPassword(req)) });
+  } catch (error) {
+    console.error('Erro ao validar senha master:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao validar senha master.' });
+  }
+});
+
+adminWorkbenchRoutes.put('/settings/master-password', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  if (!payload) {
+    return res.status(400).json({ error: 'Payload invalido para redefinir senha master.' });
+  }
+
+  const currentPassword = getPayloadString(payload, 'currentPassword');
+  const newPassword = getPayloadString(payload, 'newPassword');
+
+  if (!currentPassword) {
+    return res.status(400).json({ error: 'Informe a senha master atual.' });
+  }
+
+  if (newPassword.length < MASTER_PASSWORD_MIN_LENGTH) {
+    return res.status(400).json({ error: `A nova senha master deve ter pelo menos ${MASTER_PASSWORD_MIN_LENGTH} caracteres.` });
+  }
+
+  try {
+    const current = await workbenchStore.getSettings(tenant || undefined);
+    if (currentPassword !== resolveMasterPassword(current, getRequestFallbackMasterPassword(req))) {
+      return res.status(403).json({ error: 'Senha master atual invalida.' });
+    }
+
+    const saved = await workbenchStore.saveSettings(
+      {
+        ...current,
+        masterPassword: newPassword,
+        masterPasswordUpdatedAt: new Date().toISOString(),
+      },
+      tenant || undefined,
+    );
+
+    return res.json({ ok: true, settings: pickBasicPlatformSettings(saved) });
+  } catch (error) {
+    console.error('Erro ao redefinir senha master:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao redefinir senha master.' });
   }
 });
 
