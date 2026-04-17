@@ -2038,11 +2038,18 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
                             <div className="clientes-card-static">
                               <div className="clientes-card-head">
                                 <div className={`clientes-card-avatar ${toneClass}`}>{getClientInitials(toStringValue(item.client.name))}</div>
-                                <div className="clientes-card-identity">
-                                  <strong>{toStringValue(item.client.name) || 'Cliente sem nome'}</strong>
-                                  <span><Phone className="w-3 h-3" /> {toStringValue(item.client.phone) || '--'}</span>
+                                <div className="clientes-card-head-main">
+                                  <div className="clientes-card-identity">
+                                    <strong>{toStringValue(item.client.name) || 'Cliente sem nome'}</strong>
+                                  </div>
+                                  <div className="clientes-card-contact">
+                                    <Phone className="w-3 h-3" />
+                                    <span>{toStringValue(item.client.phone) || '--'}</span>
+                                  </div>
+                                  <div className="clientes-card-status-row">
+                                    <span className={`clientes-pill ${toneClass}`}>{item.insight.toneLabel}</span>
+                                  </div>
                                 </div>
-                                <span className={`clientes-pill ${toneClass}`}>{item.insight.toneLabel}</span>
                               </div>
 
                               <div className="clientes-card-quickline">

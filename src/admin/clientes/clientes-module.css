@@ -417,7 +417,7 @@
 
 .clientes-kanban {
   display: grid;
-  grid-template-columns: repeat(6, minmax(238px, 1fr));
+  grid-template-columns: repeat(6, minmax(272px, 1fr));
   gap: 14px;
   overflow-x: auto;
   padding-bottom: 6px;
@@ -578,9 +578,15 @@
 
 .clientes-card-head {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 10px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
+}
+
+.clientes-card-head-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
 }
 
 .clientes-card-avatar,
@@ -605,24 +611,40 @@
 .clientes-card-identity strong {
   display: block;
   color: var(--admin-text);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 800;
-  line-height: 1.35;
+  line-height: 1.3;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
-.clientes-card-identity span {
+.clientes-card-contact {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 4px;
+  gap: 6px;
+  min-width: 0;
   color: var(--admin-text-muted);
-  font-size: 10.5px;
-  line-height: 1.45;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
+.clientes-card-contact svg {
+  flex-shrink: 0;
+}
+
+.clientes-card-contact span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientes-card-status-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .clientes-pill {
@@ -636,6 +658,10 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   border: 1px solid currentColor;
+  max-width: 100%;
+  justify-self: flex-start;
+  line-height: 1.25;
+  white-space: normal;
 }
 
 .clientes-pill-muted {
@@ -659,9 +685,9 @@
   color: var(--admin-text);
   font-size: 20px;
   font-weight: 900;
-  line-height: 1.05;
+  line-height: 1.08;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .clientes-card-money span {
@@ -728,7 +754,7 @@
   font-weight: 800;
   line-height: 1.4;
   white-space: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .clientes-card-quickline span {
@@ -758,6 +784,7 @@
   line-height: 1.35;
   white-space: normal;
   text-align: left;
+  overflow-wrap: break-word;
 }
 
 .clientes-card-footer {
@@ -1525,7 +1552,7 @@
   }
 
   .clientes-kanban {
-    grid-template-columns: repeat(6, minmax(224px, 1fr));
+    grid-template-columns: repeat(6, minmax(252px, 1fr));
   }
 
   .clientes-create-form,
@@ -1604,11 +1631,6 @@
     grid-template-columns: auto 1fr;
   }
 
-  .clientes-card-head .clientes-pill {
-    grid-column: 1 / -1;
-    justify-self: flex-start;
-  }
-
   .clientes-card-metrics,
   .clientes-modal-kpis,
   .clientes-agent-totals,
@@ -1624,5 +1646,9 @@
 
   .clientes-kanban-column {
     min-height: 460px;
+  }
+
+  .clientes-kanban {
+    grid-template-columns: repeat(6, minmax(236px, 1fr));
   }
 }
