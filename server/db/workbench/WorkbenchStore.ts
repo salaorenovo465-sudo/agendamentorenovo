@@ -48,6 +48,15 @@ class WorkbenchStore {
     return this.supabase;
   }
 
+  private async deleteAllFromTable(table: string): Promise<number> {
+    const supabase = this.getSupabase();
+    const { data, error } = await supabase.from(table).delete().gte('id', 0).select('id');
+    if (error) {
+      throw error;
+    }
+    return (data || []).length;
+  }
+
   private sanitizePayload(entity: WorkbenchEntity, payload: Record<string, unknown>, includeDefaults: boolean): Record<string, unknown> {
     const config = ENTITY_CONFIG[entity];
     const sanitized: Record<string, unknown> = {};
@@ -440,6 +449,42 @@ class WorkbenchStore {
     const { data, error } = await query.select('id');
     if (error) throw error;
     return (data || []).length;
+  }
+
+  async resetBookingLinkedFinance(): Promise<number> {
+    const supabase = this.getSupabase();
+    const { data, error } = await supabase
+      .from('financial_entries')
+      .delete()
+      .not('booking_id', 'is', null)
+      .select('id');
+
+    if (error) {
+      throw error;
+    }
+
+    return (data || []).length;
+  }
+
+  async resetAnalyticsHistory(): Promise<{
+    finance: number;
+    leads: number;
+    reviews: number;
+    tasks: number;
+  }> {
+    const [finance, leads, reviews, tasks] = await Promise.all([
+      this.deleteAllFromTable('financial_entries'),
+      this.deleteAllFromTable('leads'),
+      this.deleteAllFromTable('reviews'),
+      this.deleteAllFromTable('tasks'),
+    ]);
+
+    return {
+      finance,
+      leads,
+      reviews,
+      tasks,
+    };
   }
 
   async getOverview(filters?: { startDate?: string; endDate?: string }): Promise<OverviewData> {

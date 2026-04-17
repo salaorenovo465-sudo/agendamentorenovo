@@ -17,9 +17,11 @@ import {
   markFinancePaidForAdmin,
 } from './api';
 import type { AdminBooking, AdminFinanceEntry } from './types';
+import { DangerConfirmModal } from './AdminHelpers';
 
 type Props = {
   adminKey: string;
+  onClearPaymentsHistory: () => Promise<void>;
 };
 
 const PAYMENT_METHODS = [
@@ -170,7 +172,7 @@ const sumMissingAmounts = (rows: MissingFinanceEntry[]): number =>
 const sumPrimitiveAmounts = (rows: number[]): number =>
   rows.reduce((total, row) => total + row, 0);
 
-export default function PaymentConfirmationTab({ adminKey }: Props) {
+export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistory }: Props) {
   const [entries, setEntries] = useState<AdminFinanceEntry[]>([]);
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,6 +185,22 @@ export default function PaymentConfirmationTab({ adminKey }: Props) {
   const [periodMode, setPeriodMode] = useState<'all' | 'range'>('all');
   const [startDate, setStartDate] = useState(getMonthStart());
   const [endDate, setEndDate] = useState(getTodayDate());
+  const [resetPaymentsModalOpen, setResetPaymentsModalOpen] = useState(false);
+
+  const handleClearPaymentsHistory = async () => {
+    setBusyKey('reset-payments');
+    setError('');
+
+    try {
+      await onClearPaymentsHistory();
+      await load();
+      setResetPaymentsModalOpen(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao limpar o historico de pagamentos.');
+    } finally {
+      setBusyKey(null);
+    }
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -453,6 +471,14 @@ export default function PaymentConfirmationTab({ adminKey }: Props) {
           </div>
         </div>
         <div className="payments-hero-actions">
+          <button
+            type="button"
+            className="admin-btn-danger"
+            onClick={() => setResetPaymentsModalOpen(true)}
+            disabled={busyKey === 'reset-payments'}
+          >
+            {busyKey === 'reset-payments' ? <Loader2 style={{ width: 14, height: 14, animation: 'spin 1s linear infinite' }} /> : 'Limpar pagamentos'}
+          </button>
           <button type="button" className="admin-btn-outline" onClick={() => void load()}>
             <RefreshCw style={{ width: 14, height: 14 }} />
             Atualizar
@@ -796,6 +822,19 @@ export default function PaymentConfirmationTab({ adminKey }: Props) {
           </div>
         </>
       )}
+
+      <DangerConfirmModal
+        isOpen={resetPaymentsModalOpen}
+        title="Limpar pagamentos"
+        subtitle="Toda a central financeira sera reiniciada"
+        description="Todos os lancamentos de pagamento serao removidos do historico, e os status financeiros vinculados aos agendamentos serao resetados."
+        confirmText="LIMPAR PAGAMENTOS"
+        confirmLabel="Apagar pagamentos"
+        helperText="A limpeza remove os extratos financeiros do Supabase e redefine os pagamentos vinculados na agenda."
+        busy={busyKey === 'reset-payments'}
+        onClose={() => setResetPaymentsModalOpen(false)}
+        onConfirm={handleClearPaymentsHistory}
+      />
     </div>
   );
 }

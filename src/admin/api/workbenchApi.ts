@@ -68,10 +68,38 @@ export const deleteWorkbenchEntityForAdmin = async (entity: WorkbenchEntity, id:
   });
 };
 
-export const resetFinanceForAdmin = async (adminKey: string, date?: string): Promise<{ deleted: number }> =>
-  requestAdmin<{ deleted: number }>('/api/admin/workbench/finance/reset', adminKey, {
+export const resetFinanceForAdmin = async (
+  adminKey: string,
+  date?: string,
+): Promise<{ deleted: number; bookingsReset?: number }> =>
+  requestAdmin<{ deleted: number; bookingsReset?: number }>('/api/admin/workbench/finance/reset', adminKey, {
     method: 'POST',
     body: JSON.stringify(date ? { date } : {}),
+  });
+
+export const resetAnalyticsHistoryForAdmin = async (
+  adminKey: string,
+): Promise<{
+  deleted: {
+    bookings: number;
+    finance: number;
+    leads: number;
+    reviews: number;
+    tasks: number;
+    calendarEvents: number;
+  };
+}> =>
+  requestAdmin<{
+    deleted: {
+      bookings: number;
+      finance: number;
+      leads: number;
+      reviews: number;
+      tasks: number;
+      calendarEvents: number;
+    };
+  }>('/api/admin/history/reset', adminKey, {
+    method: 'POST',
   });
 
 export const convertLeadForAdmin = async (

@@ -598,6 +598,42 @@ class BookingStore {
     return true;
   }
 
+  async resetAll(): Promise<number> {
+    const sqliteCountRow = this.sqlite.prepare('SELECT COUNT(*) as cnt FROM bookings').get() as { cnt: number } | undefined;
+    const sqliteCount = sqliteCountRow?.cnt || 0;
+
+    if (this.supabaseEnabled && this.supabase) {
+      const { data, error } = await this.supabase.from('bookings').delete().gte('id', 0).select('id');
+      if (error) throw error;
+      this.sqlite.prepare('DELETE FROM bookings').run();
+      return (data || []).length;
+    }
+
+    this.sqlite.prepare('DELETE FROM bookings').run();
+    return sqliteCount;
+  }
+
+  async resetAllPaymentStatuses(): Promise<number> {
+    const now = new Date().toISOString();
+    const sqliteCountRow = this.sqlite.prepare('SELECT COUNT(*) as cnt FROM bookings').get() as { cnt: number } | undefined;
+    const sqliteCount = sqliteCountRow?.cnt || 0;
+
+    if (this.supabaseEnabled && this.supabase) {
+      const { data, error } = await this.supabase
+        .from('bookings')
+        .update({ payment_status: 'pendente', updated_at: now })
+        .gte('id', 0)
+        .select('id');
+
+      if (error) throw error;
+      this.sqlite.prepare("UPDATE bookings SET payment_status = 'pendente', updated_at = ?").run(now);
+      return (data || []).length;
+    }
+
+    this.sqlite.prepare("UPDATE bookings SET payment_status = 'pendente', updated_at = ?").run(now);
+    return sqliteCount;
+  }
+
   async updateSchedule(input: UpdateBookingScheduleInput): Promise<BookingRecord | null> {
     const conflict = await this.hasConflict(input.date, input.time, input.id);
     if (conflict) {

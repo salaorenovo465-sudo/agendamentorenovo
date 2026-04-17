@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
 import { workbenchStore, type WorkbenchEntity } from '../db/workbenchStore';
+import { bookingStore } from '../db/bookingStore';
 import { getTodayDate, parseId } from '../utils/helpers';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -368,7 +369,15 @@ adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
   const date = typeof req.body?.date === 'string' && DATE_REGEX.test(req.body.date) ? req.body.date : undefined;
   try {
     const deleted = await workbenchStore.resetFinance(date);
-    return res.json({ message: `${deleted} entradas financeiras removidas.`, deleted });
+    let bookingsReset = 0;
+    if (!date) {
+      bookingsReset = await bookingStore.resetAllPaymentStatuses();
+    }
+    return res.json({
+      message: `${deleted} entradas financeiras removidas.`,
+      deleted,
+      bookingsReset,
+    });
   } catch (error) {
     console.error('Erro ao zerar financeiro:', error);
     if (isWorkbenchUnavailable(error)) {

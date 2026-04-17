@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, CheckCircle, XCircle, Clock, AlertTriangle, Copy, Check } from 'lucide-react';
+import { X, CheckCircle, XCircle, Clock, AlertTriangle, Copy, Check, Loader2 } from 'lucide-react';
 
 /* ═══ 1. SAUDAÇÃO DINÂMICA ═══ */
 export function getGreeting(): { text: string; emoji: string } {
@@ -227,6 +227,115 @@ export function RejectModal({ isOpen, onClose, onConfirm }: { isOpen: boolean; o
 }
 
 /* ═══ 36. SEARCH MODAL (Ctrl+K) ═══ */
+type DangerConfirmModalProps = {
+  isOpen: boolean;
+  title: string;
+  subtitle: string;
+  description: string;
+  confirmText: string;
+  confirmLabel: string;
+  helperText?: string;
+  busy?: boolean;
+  onClose: () => void;
+  onConfirm: () => void | Promise<void>;
+};
+
+export function DangerConfirmModal({
+  isOpen,
+  title,
+  subtitle,
+  description,
+  confirmText,
+  confirmLabel,
+  helperText,
+  busy = false,
+  onClose,
+  onConfirm,
+}: DangerConfirmModalProps) {
+  const [confirmation, setConfirmation] = useState('');
+
+  useEffect(() => {
+    if (isOpen) setConfirmation('');
+  }, [isOpen]);
+
+  if (!isOpen) return null;
+
+  const normalizedConfirmText = confirmText.trim().toUpperCase();
+  const isMatch = confirmation.trim().toUpperCase() === normalizedConfirmText;
+
+  const handleConfirm = async () => {
+    if (!isMatch || busy) return;
+    await onConfirm();
+  };
+
+  return (
+    <div className="admin-modal-root admin-modal-root-critical">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="admin-modal-overlay" onClick={() => { if (!busy) onClose(); }} />
+      <motion.div initial={{ opacity: 0, scale: 0.95, y: 18 }} animate={{ opacity: 1, scale: 1, y: 0 }} className="admin-modal-card admin-modal-card-sm admin-lock-modal" role="dialog" aria-modal="true">
+        <div className="admin-modal-header admin-modal-header-compact">
+          <div className="admin-modal-icon admin-modal-icon-danger">
+            <AlertTriangle className="w-5 h-5 text-rose-600" />
+          </div>
+          <div>
+            <h3 className="admin-modal-title">{title}</h3>
+            <p className="admin-modal-subtitle">{subtitle}</p>
+          </div>
+        </div>
+        <div className="admin-modal-body">
+          <div className="admin-lock-panel">
+            <span className="admin-lock-kicker">Acao irreversivel</span>
+            <p>{description}</p>
+          </div>
+          <p className="admin-modal-help">
+            Digite{' '}
+            <strong
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '4px 10px',
+                borderRadius: 999,
+                border: '1px solid rgba(239,68,68,0.2)',
+                background: 'rgba(239,68,68,0.08)',
+                color: '#b91c1c',
+                fontSize: 12,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              {confirmText}
+            </strong>{' '}
+            para confirmar.
+          </p>
+          <input
+            autoFocus
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape' && !busy) onClose();
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void handleConfirm();
+              }
+            }}
+            placeholder={confirmText}
+            className="admin-input"
+          />
+          <p className="admin-modal-subtitle" style={{ marginTop: 12 }}>
+            {helperText || 'Esta limpeza remove os dados tambem do Supabase e nao pode ser desfeita.'}
+          </p>
+        </div>
+        <div className="admin-modal-footer admin-modal-footer-split">
+          <button type="button" onClick={onClose} className="admin-btn-outline px-4 py-2 text-sm" disabled={busy}>Cancelar</button>
+          <button type="button" onClick={() => void handleConfirm()} className="admin-btn-danger px-4 py-2 text-sm" disabled={!isMatch || busy}>
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+            {busy ? 'Limpando...' : confirmLabel}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 export function SearchModal({ isOpen, onClose, onSearch }: { isOpen: boolean; onClose: () => void; onSearch: (q: string) => void }) {
   const [query, setQuery] = useState('');
   useEffect(() => { if (isOpen) setQuery(''); }, [isOpen]);

@@ -38,6 +38,8 @@ import {
   listAdminBookings,
   listWorkbenchEntityForAdmin,
   rejectAdminBooking,
+  resetAdminBookingsHistory,
+  resetAnalyticsHistoryForAdmin,
   rescheduleAdminBooking,
   saveAdminSettings,
   resetFinanceForAdmin,
@@ -657,6 +659,68 @@ export default function AdminApp() {
     }
   };
 
+  const handleResetPaymentsHistory = async (): Promise<void> => {
+    if (!adminKey) return;
+    setError('');
+
+    try {
+      const result = await resetFinanceForAdmin(adminKey);
+      toast.success(`${result.deleted} lancamento(s) financeiro(s) removido(s).`);
+      await Promise.all([loadOverview(), loadEntity('finance')]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao limpar o historico de pagamentos.';
+      setError(message);
+      toast.error(message);
+      throw err;
+    }
+  };
+
+  const handleResetAgendaHistory = async (): Promise<void> => {
+    if (!adminKey) return;
+    setError('');
+
+    try {
+      const result = await resetAdminBookingsHistory(adminKey);
+      setRescheduleMap({});
+      toast.success(
+        `${result.deleted} agendamento(s) removido(s). ${result.linkedFinanceDeleted || 0} extrato(s) vinculado(s) tambem foram apagados.`,
+      );
+      await Promise.all([loadBookings(), loadAllBookings(), loadOverview(), loadEntity('finance')]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao limpar o historico da agenda.';
+      setError(message);
+      toast.error(message);
+      throw err;
+    }
+  };
+
+  const handleResetAnalyticsHistory = async (): Promise<void> => {
+    if (!adminKey) return;
+    setError('');
+
+    try {
+      const result = await resetAnalyticsHistoryForAdmin(adminKey);
+      setRescheduleMap({});
+      toast.success(
+        `Historico total limpo: ${result.deleted.bookings} agendamento(s), ${result.deleted.finance} financeiro(s), ${result.deleted.leads} lead(s), ${result.deleted.tasks} tarefa(s) e ${result.deleted.reviews} avaliacao(oes).`,
+      );
+      await Promise.all([
+        loadBookings(),
+        loadAllBookings(),
+        loadOverview(),
+        loadEntity('finance'),
+        loadEntity('leads'),
+        loadEntity('tasks'),
+        loadEntity('reviews'),
+      ]);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Erro ao limpar o historico total do analytics.';
+      setError(message);
+      toast.error(message);
+      throw err;
+    }
+  };
+
   const handleSaveSettings = async () => {
     if (!adminKey) return;
     setSavingSettings(true);
@@ -920,6 +984,7 @@ export default function AdminApp() {
               onReschedule={handleRescheduleBooking}
               onCreateBooking={handleCreateAgendaBooking}
               onAssignProfessional={handleAssignBookingProfessional}
+              onClearHistory={handleResetAgendaHistory}
               serviceCatalog={localServices}
               professionals={entityRows.professionals}
               defaultCreateDate={defaultAgendaDate}
@@ -998,7 +1063,12 @@ export default function AdminApp() {
             />
           )}
 
-          {activeTab === 'pagamentos' && <PaymentConfirmationTab adminKey={adminKey} />}
+          {activeTab === 'pagamentos' && (
+            <PaymentConfirmationTab
+              adminKey={adminKey}
+              onClearPaymentsHistory={handleResetPaymentsHistory}
+            />
+          )}
 
           {WHATSAPP_WORKSPACE_ENABLED && activeTab === 'whatsapp' && (
             <WhatsAppWorkspace adminKey={adminKey} settings={settings} tenantSlug={activeTenant} />
@@ -1013,6 +1083,7 @@ export default function AdminApp() {
               analyticsSubTab={analyticsSubTab}
               setAnalyticsSubTab={setAnalyticsSubTab}
               dateLabel={dateFilterLabel}
+              onClearHistory={handleResetAnalyticsHistory}
             />
           )}
 

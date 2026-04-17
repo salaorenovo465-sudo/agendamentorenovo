@@ -28,7 +28,7 @@ import {
   notifyCustomerRescheduledBooking,
 } from '../services/notificationService';
 import { logoutEvolutionInstance } from '../services/evolutionInstanceService';
-import type { BookingServiceItem } from '../types';
+import type { BookingRecord, BookingServiceItem } from '../types';
 import { toPositiveInt, parseId as parseBookingId, getTodayDate } from '../utils/helpers';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
@@ -79,6 +79,25 @@ const sumBookingServiceItems = (items: BookingServiceItem[] | undefined): number
   }
 
   return items.reduce((sum, item) => sum + parseMoneyAmount(item.price), 0);
+};
+
+const deleteCalendarEventsForBookings = async (bookings: BookingRecord[]): Promise<number> => {
+  let removed = 0;
+
+  for (const booking of bookings) {
+    if (!booking.googleEventId) {
+      continue;
+    }
+
+    try {
+      await deleteCalendarEventById(booking.googleEventId);
+      removed += 1;
+    } catch (error) {
+      console.error('Falha ao remover evento do Google Calendar durante limpeza em massa:', error);
+    }
+  }
+
+  return removed;
 };
 
 const parseOptionalProfessionalId = (value: unknown): number | null => {
@@ -191,6 +210,58 @@ adminRoutes.get('/bookings', async (req, res) => {
   } catch (error) {
     console.error('Erro ao listar agendamentos do admin:', error);
     return res.status(500).json({ error: 'Erro ao listar agendamentos.' });
+  }
+});
+
+adminRoutes.post('/bookings/reset', async (_req, res) => {
+  try {
+    const currentBookings = await bookingStore.listAll();
+    let linkedFinanceDeleted = 0;
+
+    if (workbenchStore.isEnabled()) {
+      linkedFinanceDeleted = await workbenchStore.resetBookingLinkedFinance();
+    }
+
+    const deleted = await bookingStore.resetAll();
+    const calendarEventsRemoved = await deleteCalendarEventsForBookings(currentBookings);
+
+    return res.json({
+      message: `${deleted} agendamentos removidos com sucesso.`,
+      deleted,
+      linkedFinanceDeleted,
+      calendarEventsRemoved,
+    });
+  } catch (error) {
+    console.error('Erro ao limpar historico de agendamentos:', error);
+    return res.status(500).json({ error: 'Erro ao limpar historico de agendamentos.' });
+  }
+});
+
+adminRoutes.post('/history/reset', async (_req, res) => {
+  try {
+    if (!workbenchStore.isEnabled()) {
+      return res.status(503).json({ error: 'Modulo workbench indisponivel para limpar o historico total.' });
+    }
+
+    const currentBookings = await bookingStore.listAll();
+    const history = await workbenchStore.resetAnalyticsHistory();
+    const bookingsDeleted = await bookingStore.resetAll();
+    const calendarEventsRemoved = await deleteCalendarEventsForBookings(currentBookings);
+
+    return res.json({
+      message: 'Historico total removido com sucesso.',
+      deleted: {
+        bookings: bookingsDeleted,
+        finance: history.finance,
+        leads: history.leads,
+        reviews: history.reviews,
+        tasks: history.tasks,
+        calendarEvents: calendarEventsRemoved,
+      },
+    });
+  } catch (error) {
+    console.error('Erro ao limpar historico total:', error);
+    return res.status(500).json({ error: 'Erro ao limpar historico total.' });
   }
 });
 

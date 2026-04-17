@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import {
   AlertTriangle,
   CalendarPlus,
@@ -27,6 +27,7 @@ import {
   type ServiceCatalogCategory,
   type ServiceCatalogItem,
 } from '../collaboratorUtils';
+import { DangerConfirmModal } from '../AdminHelpers';
 
 type SelectedAgendaService = {
   category: string;
@@ -150,6 +151,7 @@ export function AgendaTab({
   onReschedule,
   onCreateBooking,
   onAssignProfessional,
+  onClearHistory,
   serviceCatalog,
   professionals,
   defaultCreateDate,
@@ -168,6 +170,7 @@ export function AgendaTab({
   onReschedule: (booking: AdminBooking) => Promise<void>;
   onCreateBooking: (payload: AdminCreateBookingPayload) => Promise<void>;
   onAssignProfessional: (booking: AdminBooking, professionalId: number | null) => Promise<void>;
+  onClearHistory: () => Promise<void>;
   serviceCatalog: ServiceCatalogCategory[];
   professionals: Record<string, unknown>[];
   defaultCreateDate: string;
@@ -178,6 +181,8 @@ export function AgendaTab({
   const [serviceQuery, setServiceQuery] = useState('');
   const [createError, setCreateError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
   const [availability, setAvailability] = useState<AvailabilityState>({
     busySlots: [],
     loading: false,
@@ -292,6 +297,16 @@ export function AgendaTab({
     setServiceQuery('');
     setCreateError('');
     setCreateOpen(true);
+  };
+
+  const handleClearHistory = async () => {
+    setClearingHistory(true);
+    try {
+      await onClearHistory();
+      setClearHistoryModalOpen(false);
+    } finally {
+      setClearingHistory(false);
+    }
   };
 
   const handleCategoryChange = (categoryName: string) => {
@@ -529,6 +544,13 @@ export function AgendaTab({
               <Download className="w-3 h-3" /> Exportar CSV
             </button>
           )}
+          <button
+            onClick={() => setClearHistoryModalOpen(true)}
+            className="admin-btn-danger agenda-header-btn"
+            disabled={clearingHistory}
+          >
+            {clearingHistory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Limpar historico
+          </button>
           <button onClick={openCreateModal} className="admin-btn-primary agenda-new-booking-btn">
             <CalendarPlus style={{ width: 16, height: 16 }} /> Novo agendamento
           </button>
@@ -576,6 +598,19 @@ export function AgendaTab({
           ))}
         </div>
       )}
+
+      <DangerConfirmModal
+        isOpen={clearHistoryModalOpen}
+        title="Limpar historico da agenda"
+        subtitle="Todos os agendamentos serao removidos"
+        description="A central de agenda sera esvaziada, os extratos vinculados serao apagados e os eventos associados tambem serao removidos quando houver integracao ativa."
+        confirmText="LIMPAR AGENDA"
+        confirmLabel="Apagar agenda"
+        helperText="Esta limpeza remove o historico de agendamentos diretamente do Supabase e tenta excluir os eventos vinculados da agenda externa."
+        busy={clearingHistory}
+        onClose={() => setClearHistoryModalOpen(false)}
+        onConfirm={handleClearHistory}
+      />
 
       {createOpen && (
         <div className="admin-modal-root agenda-create-root">

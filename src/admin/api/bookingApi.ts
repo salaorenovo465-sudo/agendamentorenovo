@@ -33,6 +33,18 @@ export const deleteAdminBooking = async (id: number, adminKey: string): Promise<
   });
 };
 
+export const resetAdminBookingsHistory = async (
+  adminKey: string,
+): Promise<{ deleted: number; linkedFinanceDeleted: number; calendarEventsRemoved: number }> => {
+  return requestAdmin<{ deleted: number; linkedFinanceDeleted: number; calendarEventsRemoved: number }>(
+    '/api/admin/bookings/reset',
+    adminKey,
+    {
+      method: 'POST',
+    },
+  );
+};
+
 export const getBookingAvailability = async (date: string): Promise<BookingAvailability> => {
   const response = await fetch(apiUrl(`/api/availability?date=${encodeURIComponent(date)}`));
   if (!response.ok) {

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { BarChart3, CalendarDays, Percent, Sparkles, UserRound, X } from 'lucide-react';
+import { BarChart3, CalendarDays, Loader2, Percent, Sparkles, Trash2, UserRound, X } from 'lucide-react';
 
 import { ActivityTimeline, AnalyticsPanel, MostProfitableService, OccupancyBar, StatusPieChart, WeeklyCalendar } from '../AdminFeatures';
 import type { AdminBooking } from '../types';
@@ -10,6 +10,7 @@ import {
   createCollaboratorDraft,
   type ServiceCatalogCategory,
 } from '../collaboratorUtils';
+import { DangerConfirmModal } from '../AdminHelpers';
 
 type CollaboratorAnalyticsModalProps = {
   collaborator: ReturnType<typeof createCollaboratorDraft>;
@@ -123,11 +124,11 @@ function CollaboratorAnalyticsModal({
               <div key={`${row.category}-${row.serviceName}`} className="analytics-service-row">
                 <div>
                   <strong>{row.serviceName}</strong>
-                  <span>{row.category || 'Sem categoria'} • {row.commissionPercent}%</span>
+                  <span>{row.category || 'Sem categoria'} | {row.commissionPercent}%</span>
                 </div>
                 <div className="analytics-service-values">
-                  <span>Geral: {row.overallQty} • {formatMoney(row.overallCommission)}</span>
-                  <span>Filtro: {row.periodQty} • {formatMoney(row.periodCommission)}</span>
+                  <span>Geral: {row.overallQty} | {formatMoney(row.overallCommission)}</span>
+                  <span>Filtro: {row.periodQty} | {formatMoney(row.periodCommission)}</span>
                 </div>
               </div>
             ))}
@@ -151,6 +152,7 @@ export function AnalyticsTab({
   analyticsSubTab,
   setAnalyticsSubTab,
   dateLabel,
+  onClearHistory,
 }: {
   bookings: AdminBooking[];
   allBookings: AdminBooking[];
@@ -159,8 +161,11 @@ export function AnalyticsTab({
   analyticsSubTab: 'geral' | 'colaboradores';
   setAnalyticsSubTab: (tab: 'geral' | 'colaboradores') => void;
   dateLabel: string;
+  onClearHistory: () => Promise<void>;
 }) {
   const [selectedCollaboratorId, setSelectedCollaboratorId] = useState<number | null>(null);
+  const [clearingHistory, setClearingHistory] = useState(false);
+  const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
 
   const collaborators = useMemo(
     () => profs.map((prof) => createCollaboratorDraft(prof, serviceCatalog)),
@@ -180,11 +185,33 @@ export function AnalyticsTab({
     }));
   }, [allBookings, bookings, collaborators]);
 
+  const handleClearHistory = async () => {
+    setClearingHistory(true);
+    try {
+      await onClearHistory();
+      setSelectedCollaboratorId(null);
+      setClearHistoryModalOpen(false);
+    } finally {
+      setClearingHistory(false);
+    }
+  };
+
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button onClick={() => setAnalyticsSubTab('geral')} className={analyticsSubTab === 'geral' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Visao Geral</button>
-        <button onClick={() => setAnalyticsSubTab('colaboradores')} className={analyticsSubTab === 'colaboradores' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Por Colaborador</button>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button onClick={() => setAnalyticsSubTab('geral')} className={analyticsSubTab === 'geral' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Visao Geral</button>
+          <button onClick={() => setAnalyticsSubTab('colaboradores')} className={analyticsSubTab === 'colaboradores' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Por Colaborador</button>
+        </div>
+        <button
+          onClick={() => setClearHistoryModalOpen(true)}
+          className="admin-btn-danger"
+          style={{ padding: '6px 16px', fontSize: 12 }}
+          disabled={clearingHistory}
+        >
+          {clearingHistory ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Trash2 style={{ width: 13, height: 13 }} />}
+          Limpar historico total
+        </button>
       </div>
       {analyticsSubTab === 'geral' ? (
         <div className="space-y-4">
@@ -212,7 +239,7 @@ export function AnalyticsTab({
                 <div className="admin-avatar">{collaborator.name.charAt(0).toUpperCase()}</div>
                 <div style={{ minWidth: 0 }}>
                   <p>{collaborator.name}</p>
-                  <span>{countCollaboratorCategories(collaborator)} categorias • {countCollaboratorServices(collaborator)} servicos</span>
+                  <span>{countCollaboratorCategories(collaborator)} categorias | {countCollaboratorServices(collaborator)} servicos</span>
                 </div>
                 <CalendarDays style={{ width: 16, height: 16, marginLeft: 'auto', color: 'var(--admin-accent)' }} />
               </div>
@@ -240,6 +267,19 @@ export function AnalyticsTab({
           ))}
         </div>
       )}
+
+      <DangerConfirmModal
+        isOpen={clearHistoryModalOpen}
+        title="Limpar historico total"
+        subtitle="Analytics e operacao serao zerados"
+        description="Todos os agendamentos, extratos financeiros, leads, tarefas e avaliacoes serao apagados do historico operacional para reiniciar a base analitica."
+        confirmText="LIMPAR HISTORICO TOTAL"
+        confirmLabel="Apagar historico total"
+        helperText="Esta limpeza atua direto no Supabase e remove o historico completo usado em analytics, agenda e pagamentos."
+        busy={clearingHistory}
+        onClose={() => setClearHistoryModalOpen(false)}
+        onConfirm={handleClearHistory}
+      />
 
       {selectedCollaborator && (
         <CollaboratorAnalyticsModal
