@@ -960,11 +960,11 @@
   position: sticky;
   top: 186px;
   z-index: 2;
-  display: flex;
-  gap: 8px;
-  padding: 0 20px 14px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px 20px 14px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(255, 255, 255, 0.92));
-  overflow-x: auto;
 }
 
 .clientes-modal-tabs button {
@@ -972,15 +972,20 @@
   border-radius: 999px;
   background: var(--admin-bg);
   color: var(--admin-text-muted);
-  min-height: 38px;
+  min-height: 42px;
   padding: 0 14px;
   font-size: 11px;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-width: 0;
+  line-height: 1.15;
   white-space: nowrap;
-  flex: 0 0 auto;
 }
 
 .clientes-modal-tabs button.active {
@@ -997,6 +1002,7 @@
   overflow-y: auto;
   min-height: 0;
   flex: 1 1 auto;
+  align-content: start;
 }
 
 .clientes-panel-shell,
@@ -1165,6 +1171,82 @@
   align-items: start;
 }
 
+.clientes-agent-shell,
+.clientes-agent-workspace,
+.clientes-agent-support-grid {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.clientes-agent-overview-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.clientes-agent-overview-card,
+.clientes-agent-empty-state,
+.clientes-agent-flow-row,
+.clientes-agent-playbook-row,
+.clientes-agent-queue-list article {
+  border: 1px solid var(--admin-border);
+  border-radius: 16px;
+  background: var(--admin-bg);
+  padding: 12px;
+}
+
+.clientes-agent-overview-card {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.clientes-agent-overview-card span,
+.clientes-agent-flow-row span,
+.clientes-agent-playbook-row .clientes-agent-playbook-head span {
+  color: var(--admin-text-muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.clientes-agent-overview-card strong,
+.clientes-agent-flow-row strong,
+.clientes-agent-playbook-row strong,
+.clientes-agent-empty-state strong {
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.clientes-agent-overview-card small,
+.clientes-agent-flow-row small,
+.clientes-agent-playbook-row p,
+.clientes-agent-playbook-row small,
+.clientes-agent-empty-state p {
+  color: var(--admin-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.clientes-agent-workspace {
+  grid-template-columns: minmax(0, 1.12fr) minmax(320px, 0.88fr);
+  align-items: start;
+}
+
+.clientes-agent-support-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+}
+
 .clientes-agent-console,
 .clientes-agent-pipeline,
 .clientes-agent-lab {
@@ -1280,6 +1362,11 @@
   margin-bottom: 14px;
 }
 
+.clientes-agent-scenarios-compact .clientes-scenario-card {
+  padding: 12px;
+  gap: 4px;
+}
+
 .clientes-scenario-card {
   border: 1px solid var(--admin-border);
   border-radius: 16px;
@@ -1324,11 +1411,25 @@
   margin-bottom: 14px;
 }
 
+.clientes-agent-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .clientes-agent-preview > div {
   min-width: min(220px, 100%);
   flex: 1 1 220px;
   display: grid;
   gap: 4px;
+}
+
+.clientes-agent-preview-grid > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .clientes-agent-preview p {
@@ -1359,6 +1460,54 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   margin-bottom: 14px;
+}
+
+.clientes-agent-queue-board,
+.clientes-agent-flow-list,
+.clientes-agent-playbook-list {
+  display: grid;
+  gap: 10px;
+}
+
+.clientes-agent-queue-list {
+  display: grid;
+  gap: 8px;
+}
+
+.clientes-agent-queue-list article {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.clientes-agent-queue-list article > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.clientes-agent-flow-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.45fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.clientes-agent-flow-row > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.clientes-agent-playbook-row {
+  display: grid;
+  gap: 6px;
+}
+
+.clientes-agent-empty-state {
+  display: grid;
+  gap: 6px;
 }
 
 .clientes-rule-card {
@@ -1502,10 +1651,13 @@
   .clientes-command-grid,
   .clientes-summary-layout,
   .clientes-agent-layout,
+  .clientes-agent-workspace,
+  .clientes-agent-support-grid,
   .clientes-timeline-grid {
     grid-template-columns: 1fr;
   }
 
+  .clientes-agent-overview-grid,
   .clientes-agent-engine-grid,
   .clientes-agent-playbooks {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1523,11 +1675,17 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .clientes-agent-overview-grid,
   .clientes-agent-mode-grid,
   .clientes-agent-scenarios,
   .clientes-rule-grid,
   .clientes-agent-engine-grid,
-  .clientes-agent-playbooks {
+  .clientes-agent-playbooks,
+  .clientes-agent-preview-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .clientes-agent-flow-row {
     grid-template-columns: 1fr;
   }
 }
@@ -1544,7 +1702,7 @@
 
   .clientes-modal-tabs {
     top: 0;
-    padding: 0 16px 12px;
+    padding: 10px 16px 12px;
   }
 
   .clientes-modal-body {
@@ -1611,6 +1769,18 @@
     width: 100%;
   }
 
+  .clientes-modal-tabs {
+    gap: 8px;
+    padding: 10px 16px 12px;
+  }
+
+  .clientes-modal-tabs button {
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 10px;
+    letter-spacing: 0.08em;
+  }
+
   .clientes-modal-actions .admin-btn-outline,
   .clientes-modal-actions .admin-btn-primary,
   .clientes-inline-actions .admin-btn-outline,
@@ -1629,6 +1799,11 @@
 
   .clientes-card-head {
     grid-template-columns: auto 1fr;
+  }
+
+  .clientes-agent-overview-grid,
+  .clientes-agent-preview-grid {
+    grid-template-columns: 1fr;
   }
 
   .clientes-card-metrics,

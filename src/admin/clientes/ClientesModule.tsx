@@ -760,6 +760,11 @@ function ClienteModal({
     ],
   );
 
+  const activeRulesCount = clientRules.filter((rule) => rule.enabled).length;
+  const queuedEventsCount = clientEvents.filter((event) => event.status === 'queued').length;
+  const pendingTaskCount = clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length;
+  const recentAgentEvents = clientEvents.slice(0, 4);
+
   const handleSaveClient = async () => {
     if (!clientId) return;
     setSaving(true);
@@ -1033,14 +1038,19 @@ function ClienteModal({
           </div>
 
           <div className="clientes-modal-tabs">
-            {(['resumo', 'agente', 'timeline'] as const).map((tabKey) => (
+            {([
+              { key: 'resumo', label: 'Resumo' },
+              { key: 'agente', label: 'Agente' },
+              { key: 'timeline', label: 'Timeline' },
+            ] as const).map((tab) => (
               <button
-                key={tabKey}
+                key={tab.key}
                 type="button"
-                className={activeTab === tabKey ? 'active' : ''}
-                onClick={() => setActiveTab(tabKey)}
+                className={activeTab === tab.key ? 'active' : ''}
+                onClick={() => setActiveTab(tab.key)}
+                title={tab.label}
               >
-                {tabKey === 'resumo' ? 'Resumo' : tabKey === 'agente' ? 'Agente AI' : 'Timeline'}
+                {tab.label}
               </button>
             ))}
           </div>
@@ -1234,80 +1244,49 @@ function ClienteModal({
                 )}
 
                 {activeTab === 'agente' && (
-                  <div className="clientes-agent-layout">
-                    <div className="clientes-agent-mainstack">
-                      <section className="clientes-surface clientes-agent-console">
-                        <div className="clientes-section-head">
-                          <div>
-                            <h4><Bot className="w-4 h-4" /> Control tower do agente</h4>
-                            <p>Fluxo orquestrado em codigo: trigger, enriquecimento, decisao, dispatch e follow-up.</p>
-                          </div>
+                  <div className="clientes-agent-shell">
+                    <section className="clientes-surface clientes-agent-overview">
+                      <div className="clientes-section-head">
+                        <div>
+                          <h4><Bot className="w-4 h-4" /> Central do agente</h4>
+                          <p>Visao executiva do motor de recorrencia, com prioridade, proximo ciclo e saude da fila.</p>
                         </div>
+                      </div>
 
-                        <div className="clientes-agent-mode-grid">
-                          <article className={`clientes-agent-mode-card tone-${agentControlTower.nodes[2]?.tone || 'neutral'}`}>
-                            <span>Modo ativo</span>
-                            <strong>{agentControlTower.modeLabel}</strong>
-                            <small>{agentControlTower.modeDetail}</small>
-                          </article>
-                          <article className="clientes-agent-mode-card clientes-agent-mode-channel">
-                            <span>Canal e operacao</span>
-                            <strong>{agentControlTower.channelLabel}</strong>
-                            <small>{agentControlTower.channelDetail}</small>
-                          </article>
-                        </div>
+                      <div className="clientes-agent-overview-grid">
+                        <article className={`clientes-agent-overview-card tone-${agentExecutionDecision.tone}`}>
+                          <span>Modo do motor</span>
+                          <strong>{agentExecutionDecision.modeLabel}</strong>
+                          <small>{agentExecutionDecision.modeDetail}</small>
+                        </article>
+                        <article className={`clientes-agent-overview-card tone-${agentExecutionDecision.priority === 'alta' ? 'risk' : agentExecutionDecision.priority === 'media' ? 'active' : 'neutral'}`}>
+                          <span>Prioridade</span>
+                          <strong>{agentExecutionDecision.priorityLabel}</strong>
+                          <small>{agentExecutionDecision.owner} | score {agentExecutionDecision.urgencyScore}/100</small>
+                        </article>
+                        <article className="clientes-agent-overview-card">
+                          <span>Proximo ciclo</span>
+                          <strong>{formatDate(agentPreviewNextDate)}</strong>
+                          <small>{queuedEventsCount} evento(s) em fila | {pendingTaskCount} tarefa(s) aberta(s)</small>
+                        </article>
+                        <article className="clientes-agent-overview-card">
+                          <span>Pipeline</span>
+                          <strong>{activeRulesCount} regra(s) ativa(s)</strong>
+                          <small>{clientEvents.length > 0 ? `${clientEvents.length} evento(s) historicos rastreados` : 'Sem historico operacional do agente ainda.'}</small>
+                        </article>
+                      </div>
+                    </section>
 
-                        <div className="clientes-agent-engine-grid">
-                          {agentControlTower.nodes.map((node) => (
-                            <article key={node.label} className={`clientes-agent-node tone-${node.tone}`}>
-                              <span>{node.label}</span>
-                              <strong>{node.value}</strong>
-                              <small>{node.detail}</small>
-                            </article>
-                          ))}
-                        </div>
-
-                        <div className="clientes-agent-playbooks">
-                          {agentControlTower.playbooks.map((playbook) => (
-                            <article key={playbook.badge} className={`clientes-agent-playbook tone-${playbook.tone}`}>
-                              <div className="clientes-agent-playbook-head">
-                                <span>{playbook.badge}</span>
-                                {playbook.tone === 'vip' ? <Crown className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
-                              </div>
-                              <strong>{playbook.title}</strong>
-                              <p>{playbook.action}</p>
-                              <small>{playbook.rationale}</small>
-                            </article>
-                          ))}
-                        </div>
-
-                        <div className="clientes-agent-guardrails">
-                          <div className="clientes-section-head">
-                            <div>
-                              <h4><CheckCircle2 className="w-4 h-4" /> Guardrails</h4>
-                              <p>Camada de seguranca e consistencia do motor para nao virar automacao cega.</p>
-                            </div>
-                          </div>
-                          <div className="clientes-agent-guardrail-list">
-                            {agentControlTower.guardrails.map((guardrail) => (
-                              <article key={guardrail}>
-                                <CheckCircle2 className="w-4 h-4" />
-                                <span>{guardrail}</span>
-                              </article>
-                            ))}
-                          </div>
-                        </div>
-                      </section>
-
+                    <div className="clientes-agent-workspace">
                       <section className="clientes-surface clientes-agent-lab">
                         <div className="clientes-section-head">
                           <div>
                             <h4><Sparkles className="w-4 h-4" /> Laboratorio de recorrencia</h4>
-                            <p>Monte o comportamento do agente com previsao por servico, janela, canal e payload final.</p>
+                            <p>Configure o agente por servico, intervalo, canal e mensagem final, sem excesso visual.</p>
                           </div>
                         </div>
 
-                        <div className="clientes-agent-scenarios">
+                        <div className="clientes-agent-scenarios clientes-agent-scenarios-compact">
                           {serviceScenarios.length === 0 ? (
                             <p className="clientes-empty">Sem dados suficientes para sugerir cadencia automatica ainda.</p>
                           ) : (
@@ -1325,21 +1304,22 @@ function ClienteModal({
                               >
                                 <strong>{scenario.serviceName}</strong>
                                 <span>{formatInterval(scenario.recommendation.value, scenario.recommendation.unit)}</span>
-                                <small>{scenario.recommendation.rationale}</small>
-                                <small>{scenario.lastDate ? `Ultimo servico em ${formatDate(scenario.lastDate)}` : 'Sem ultima data consolidada'}</small>
+                                <small>{scenario.lastDate ? `Ultimo servico ${formatDate(scenario.lastDate)}` : 'Sem ultima data consolidada'}</small>
                               </button>
                             ))
                           )}
                         </div>
 
-                        <div className="clientes-agent-preview">
+                        <div className="clientes-agent-preview clientes-agent-preview-grid">
                           <div>
                             <span>Referencia atual</span>
                             <strong>{formatDate(agentPreviewReferenceDate)}</strong>
+                            <p>Base usada para recalcular o proximo ciclo do servico gatilho.</p>
                           </div>
                           <div>
                             <span>Proxima execucao</span>
                             <strong>{formatDate(agentPreviewNextDate)}</strong>
+                            <p>{agentExecutionDecision.priorityLabel} | {agentExecutionDecision.owner}</p>
                           </div>
                           <div>
                             <span>Mensagem gerada</span>
@@ -1347,8 +1327,8 @@ function ClienteModal({
                           </div>
                           <div>
                             <span>Roteamento</span>
-                            <strong>{agentExecutionDecision.priorityLabel}</strong>
-                            <p>{agentExecutionDecision.modeLabel} | {agentExecutionDecision.owner}</p>
+                            <strong>{agentExecutionDecision.modeLabel}</strong>
+                            <p>{agentControlTower.channelDetail}</p>
                           </div>
                         </div>
 
@@ -1390,60 +1370,149 @@ function ClienteModal({
                           </button>
                         </div>
                       </section>
+
+                      <section className="clientes-surface clientes-agent-pipeline">
+                        <div className="clientes-section-head">
+                          <div>
+                            <h4><Sparkles className="w-4 h-4" /> Pipeline do agente</h4>
+                            <p>Regras ativas, fila recente e comandos de execucao em um painel mais enxuto.</p>
+                          </div>
+                        </div>
+
+                        <div className="clientes-agent-totals">
+                          <article><span>Regras totais</span><strong>{clientRules.length}</strong></article>
+                          <article><span>Ativas</span><strong>{activeRulesCount}</strong></article>
+                          <article><span>Fila</span><strong>{queuedEventsCount}</strong></article>
+                        </div>
+
+                        {clientRules.length === 0 ? (
+                          <div className="clientes-agent-empty-state">
+                            <strong>Nenhuma regra programada</strong>
+                            <p>Configure um servico gatilho ao lado para colocar o agente em operacao.</p>
+                          </div>
+                        ) : (
+                          <div className="clientes-agent-rules-list">
+                            {clientRules.map((rule) => (
+                              <article key={rule.id} className="clientes-rule-card">
+                                <div className="clientes-rule-head">
+                                  <div>
+                                    <strong>{rule.serviceName}</strong>
+                                    <span>{formatInterval(rule.intervalValue, rule.intervalUnit)} | canal {rule.channel}</span>
+                                  </div>
+                                  <span className={`clientes-pill ${rule.enabled ? 'tone-active' : 'tone-neutral'}`}>
+                                    {rule.enabled ? 'ativa' : 'pausada'}
+                                  </span>
+                                </div>
+                                <div className="clientes-rule-grid">
+                                  <div><span>Referencia</span><strong>{formatDate(rule.referenceDate)}</strong></div>
+                                  <div><span>Proximo ciclo</span><strong>{formatDate(rule.nextRunDate)}</strong></div>
+                                  <div><span>Ultima execucao</span><strong>{rule.lastExecutedAt ? formatDateTime(rule.lastExecutedAt) : '--'}</strong></div>
+                                </div>
+                                <p>{rule.messageTemplate}</p>
+                                <div className="clientes-rule-actions">
+                                  <button type="button" className="admin-btn-outline" onClick={() => void handleToggleRule(rule.id, !rule.enabled)}>
+                                    {rule.enabled ? 'Pausar' : 'Reativar'}
+                                  </button>
+                                  <button type="button" className="admin-btn-primary" onClick={() => void handleRunRule(rule)} disabled={agentBusyRule === rule.id}>
+                                    {agentBusyRule === rule.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                                    Executar
+                                  </button>
+                                  <button type="button" className="admin-btn-outline admin-btn-danger-soft" onClick={() => void handleDeleteRule(rule.id)}>
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                        )}
+
+                        {recentAgentEvents.length > 0 && (
+                          <div className="clientes-agent-queue-board">
+                            <div className="clientes-section-head">
+                              <div>
+                                <h4><CalendarClock className="w-4 h-4" /> Fila recente</h4>
+                                <p>Ultimos disparos e skips rastreados pelo motor.</p>
+                              </div>
+                            </div>
+                            <div className="clientes-agent-queue-list">
+                              {recentAgentEvents.map((event) => (
+                                <article key={event.id}>
+                                  <div>
+                                    <strong>{event.serviceName}</strong>
+                                    <span>{formatDate(event.scheduledFor)} | canal {event.channel}</span>
+                                    <small>{event.messagePreview || event.reason || 'Sem mensagem registrada'}</small>
+                                  </div>
+                                  <span className={`event-${event.status}`}>{event.status}</span>
+                                </article>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </section>
                     </div>
 
-                    <section className="clientes-surface clientes-agent-pipeline">
-                      <div className="clientes-section-head">
-                        <div>
-                          <h4><Sparkles className="w-4 h-4" /> Pipeline do agente</h4>
-                          <p>Monitor de regras vivas, pausadas e disparos que ja viraram tarefa operacional.</p>
+                    <div className="clientes-agent-support-grid">
+                      <section className="clientes-surface">
+                        <div className="clientes-section-head">
+                          <div>
+                            <h4><Bot className="w-4 h-4" /> Fluxo do motor</h4>
+                            <p>Resumo operacional do caminho de decisao do agente, sem espalhar cards demais pela tela.</p>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="clientes-agent-totals">
-                        <article><span>Regras totais</span><strong>{clientRules.length}</strong></article>
-                        <article><span>Ativas</span><strong>{clientRules.filter((rule) => rule.enabled).length}</strong></article>
-                        <article><span>Fila</span><strong>{clientEvents.filter((event) => event.status === 'queued').length}</strong></article>
-                      </div>
-
-                      {clientRules.length === 0 ? (
-                        <p className="clientes-empty">Nenhuma regra criada para este cliente ainda.</p>
-                      ) : (
-                        <div className="clientes-agent-rules-list">
-                          {clientRules.map((rule) => (
-                            <article key={rule.id} className="clientes-rule-card">
-                              <div className="clientes-rule-head">
-                                <div>
-                                  <strong>{rule.serviceName}</strong>
-                                  <span>{formatInterval(rule.intervalValue, rule.intervalUnit)} | canal {rule.channel}</span>
-                                </div>
-                                <span className={`clientes-pill ${rule.enabled ? 'tone-active' : 'tone-neutral'}`}>
-                                  {rule.enabled ? 'ativa' : 'pausada'}
-                                </span>
+                        <div className="clientes-agent-flow-list">
+                          {agentControlTower.nodes.map((node) => (
+                            <article key={node.label} className={`clientes-agent-flow-row tone-${node.tone}`}>
+                              <div>
+                                <span>{node.label}</span>
+                                <strong>{node.value}</strong>
                               </div>
-                              <p>{rule.messageTemplate}</p>
-                              <div className="clientes-rule-grid">
-                                <div><span>Referencia</span><strong>{formatDate(rule.referenceDate)}</strong></div>
-                                <div><span>Proximo ciclo</span><strong>{formatDate(rule.nextRunDate)}</strong></div>
-                                <div><span>Ultima execucao</span><strong>{rule.lastExecutedAt ? formatDateTime(rule.lastExecutedAt) : '--'}</strong></div>
-                              </div>
-                              <div className="clientes-rule-actions">
-                                <button type="button" className="admin-btn-outline" onClick={() => void handleToggleRule(rule.id, !rule.enabled)}>
-                                  {rule.enabled ? 'Pausar' : 'Reativar'}
-                                </button>
-                                <button type="button" className="admin-btn-primary" onClick={() => void handleRunRule(rule)} disabled={agentBusyRule === rule.id}>
-                                  {agentBusyRule === rule.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                                  Executar
-                                </button>
-                                <button type="button" className="admin-btn-outline admin-btn-danger-soft" onClick={() => void handleDeleteRule(rule.id)}>
-                                  <Trash2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
+                              <small>{node.detail}</small>
                             </article>
                           ))}
                         </div>
-                      )}
-                    </section>
+                      </section>
+
+                      <section className="clientes-surface clientes-agent-intelligence">
+                        <div className="clientes-section-head">
+                          <div>
+                            <h4><Crown className="w-4 h-4" /> Inteligencia e guardrails</h4>
+                            <p>Playbooks de acao e regras de seguranca que governam o comportamento do motor.</p>
+                          </div>
+                        </div>
+
+                        <div className="clientes-agent-playbook-list">
+                          {agentControlTower.playbooks.map((playbook) => (
+                            <article key={playbook.badge} className={`clientes-agent-playbook-row tone-${playbook.tone}`}>
+                              <div className="clientes-agent-playbook-head">
+                                <span>{playbook.badge}</span>
+                                {playbook.tone === 'vip' ? <Crown className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                              </div>
+                              <strong>{playbook.title}</strong>
+                              <p>{playbook.action}</p>
+                              <small>{playbook.rationale}</small>
+                            </article>
+                          ))}
+                        </div>
+
+                        <div className="clientes-agent-guardrails">
+                          <div className="clientes-section-head">
+                            <div>
+                              <h4><CheckCircle2 className="w-4 h-4" /> Guardrails</h4>
+                              <p>Camada de seguranca e consistencia para o agente nao virar automacao cega.</p>
+                            </div>
+                          </div>
+                          <div className="clientes-agent-guardrail-list">
+                            {agentControlTower.guardrails.map((guardrail) => (
+                              <article key={guardrail}>
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>{guardrail}</span>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      </section>
+                    </div>
                   </div>
                 )}
 
