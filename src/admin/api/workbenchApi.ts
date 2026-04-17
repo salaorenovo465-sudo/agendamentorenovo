@@ -84,11 +84,18 @@ export const convertLeadForAdmin = async (
     { method: 'POST' },
   );
 
-export const markFinancePaidForAdmin = async (financeId: number, adminKey: string): Promise<Record<string, unknown> | null> => {
+export const markFinancePaidForAdmin = async (
+  financeId: number,
+  adminKey: string,
+  paymentMethod?: string,
+): Promise<Record<string, unknown> | null> => {
   const response = await requestAdmin<{ entry: Record<string, unknown> | null }>(
     `/api/admin/workbench/finance/${financeId}/pay`,
     adminKey,
-    { method: 'POST' },
+    {
+      method: 'POST',
+      body: JSON.stringify(paymentMethod ? { payment_method: paymentMethod } : {}),
+    },
   );
 
   return response.entry;

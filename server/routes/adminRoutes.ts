@@ -60,6 +60,27 @@ const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
     .filter((item): item is BookingServiceItem => Boolean(item));
 };
 
+const parseMoneyAmount = (value: string | null | undefined): number => {
+  if (!value) {
+    return 0;
+  }
+
+  const match = value.match(/[\d.]+(?:,\d{2})?|\d+(?:\.\d{2})?/);
+  if (!match) {
+    return 0;
+  }
+
+  return Number(match[0].replace(/\.(?=\d{3})/g, '').replace(',', '.')) || 0;
+};
+
+const sumBookingServiceItems = (items: BookingServiceItem[] | undefined): number => {
+  if (!Array.isArray(items)) {
+    return 0;
+  }
+
+  return items.reduce((sum, item) => sum + parseMoneyAmount(item.price), 0);
+};
+
 const parseOptionalProfessionalId = (value: unknown): number | null => {
   if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
     return value;
@@ -324,9 +345,7 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
 
       if (workbenchStore.isEnabled()) {
         try {
-          const amount = updatedBooking.servicePrice
-            ? Number(String(updatedBooking.servicePrice).replace(/[^\d.,]/g, '').replace(',', '.')) || 0
-            : 0;
+          const amount = parseMoneyAmount(updatedBooking.servicePrice) || sumBookingServiceItems(updatedBooking.serviceItems);
 
           await workbenchStore.create('finance', {
             booking_id: updatedBooking.id,

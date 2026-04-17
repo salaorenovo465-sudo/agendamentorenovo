@@ -96,6 +96,22 @@ export type AdminInboxConversationPanel = {
   operational: AdminConversationOperational | null;
 };
 
+export type AdminFinanceStatus = 'pendente' | 'pago';
+
+export type AdminFinanceEntry = {
+  id: number;
+  bookingId: number | null;
+  clientName: string;
+  serviceName: string;
+  amount: number;
+  paymentMethod: string | null;
+  status: AdminFinanceStatus;
+  dueDate: string | null;
+  paidAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminTenant = {
   slug: string;
   name: string;
