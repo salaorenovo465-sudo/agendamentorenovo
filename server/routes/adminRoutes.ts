@@ -214,9 +214,14 @@ adminRoutes.post('/bookings', async (req, res) => {
       professionalName: professionalSelection.professionalName,
     });
 
-    const thread = await inboxStore.ensureThread(booking.phone, booking.name);
-    const normalizedBooking =
-      (await bookingStore.updateWhatsappThread({ id: booking.id, whatsappThreadId: thread.id })) || booking;
+    let normalizedBooking = booking;
+    try {
+      const thread = await inboxStore.ensureThread(booking.phone, booking.name);
+      normalizedBooking =
+        (await bookingStore.updateWhatsappThread({ id: booking.id, whatsappThreadId: thread.id })) || booking;
+    } catch (error) {
+      console.error('Erro ao vincular thread do inbox no agendamento admin:', error);
+    }
 
     return res.status(201).json({
       message: 'Agendamento criado com sucesso.',

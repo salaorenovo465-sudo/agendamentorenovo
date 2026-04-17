@@ -245,9 +245,14 @@ publicRoutes.post('/bookings', async (req, res) => {
       phone: customerPhone,
     });
 
-    const thread = await inboxStore.ensureThread(booking.phone, booking.name);
-    const normalizedBooking =
-      (await bookingStore.updateWhatsappThread({ id: booking.id, whatsappThreadId: thread.id })) || booking;
+    let normalizedBooking = booking;
+    try {
+      const thread = await inboxStore.ensureThread(booking.phone, booking.name);
+      normalizedBooking =
+        (await bookingStore.updateWhatsappThread({ id: booking.id, whatsappThreadId: thread.id })) || booking;
+    } catch (error) {
+      console.error('Erro ao vincular thread do inbox no agendamento publico:', error);
+    }
 
     await Promise.allSettled([
       notifySalonNewBooking(normalizedBooking),
