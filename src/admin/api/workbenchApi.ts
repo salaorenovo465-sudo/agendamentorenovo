@@ -1,6 +1,20 @@
 import type { WorkbenchEntity, WorkbenchOverview } from '../types';
 import { requestAdmin } from './apiCore';
 
+type ResetAnalyticsHistoryResponse = {
+  deleted: {
+    bookings: number;
+    finance: number;
+    leads: number;
+    reviews: number;
+    tasks: number;
+    calendarEvents: number;
+  };
+};
+
+const isNotFoundError = (error: unknown): boolean =>
+  error instanceof Error && /\b404\b/.test(error.message);
+
 export const getWorkbenchOverviewForAdmin = async (
   adminKey: string,
   filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string },
@@ -79,28 +93,21 @@ export const resetFinanceForAdmin = async (
 
 export const resetAnalyticsHistoryForAdmin = async (
   adminKey: string,
-): Promise<{
-  deleted: {
-    bookings: number;
-    finance: number;
-    leads: number;
-    reviews: number;
-    tasks: number;
-    calendarEvents: number;
-  };
-}> =>
-  requestAdmin<{
-    deleted: {
-      bookings: number;
-      finance: number;
-      leads: number;
-      reviews: number;
-      tasks: number;
-      calendarEvents: number;
-    };
-  }>('/api/admin/history/reset', adminKey, {
-    method: 'POST',
-  });
+): Promise<ResetAnalyticsHistoryResponse> => {
+  try {
+    return await requestAdmin<ResetAnalyticsHistoryResponse>('/api/admin/history/reset', adminKey, {
+      method: 'POST',
+    });
+  } catch (error) {
+    if (!isNotFoundError(error)) {
+      throw error;
+    }
+
+    return requestAdmin<ResetAnalyticsHistoryResponse>('/api/admin/workbench/history/reset', adminKey, {
+      method: 'POST',
+    });
+  }
+};
 
 export const convertLeadForAdmin = async (
   leadId: number,
