@@ -56,6 +56,20 @@ type AgentDraft = {
   messageTemplate: string;
 };
 
+type ClientServiceSnapshot = { name: string; count: number; lastDate: string | null };
+
+type ClientSummarySnapshot = {
+  totalSpent: number;
+  visitCount: number;
+  avgTicket: number;
+  services: ClientServiceSnapshot[];
+  lastVisit: AdminBooking | null;
+  nextReminder: string | null;
+  overdueRuleCount: number;
+  activeRuleCount: number;
+  dormancyDays: number | null;
+};
+
 type ClientInsight = {
   totalSpent: number;
   visitCount: number;
@@ -74,6 +88,46 @@ type ClientInsight = {
 type ClientBoardItem = {
   client: ClientRecord;
   insight: ClientInsight;
+};
+
+type AgentPipelineNode = {
+  label: string;
+  value: string;
+  detail: string;
+  tone: ClientTone;
+};
+
+type AgentPlaybook = {
+  badge: string;
+  title: string;
+  action: string;
+  rationale: string;
+  tone: ClientTone;
+};
+
+type AgentControlTower = {
+  modeLabel: string;
+  modeDetail: string;
+  channelLabel: string;
+  channelDetail: string;
+  nodes: AgentPipelineNode[];
+  playbooks: AgentPlaybook[];
+  guardrails: string[];
+};
+
+type AgentExecutionPriority = 'baixa' | 'media' | 'alta';
+
+type AgentExecutionDecision = {
+  tone: ClientTone;
+  modeLabel: string;
+  modeDetail: string;
+  priority: AgentExecutionPriority;
+  priorityLabel: string;
+  owner: string;
+  channel: ClientAgentChannel;
+  urgencyScore: number;
+  queuePressure: number;
+  rationale: string;
 };
 
 const CLIENT_COLUMNS: Array<{ status: ClientStatus; label: string; hint: string }> = [
@@ -235,6 +289,8 @@ const formatDormancy = (value: number | null): string => {
   return `${Math.floor(value / 30)}m ${value % 30}d`;
 };
 
+const clampNumber = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
+
 const formatInterval = (value: number, unit: ClientAgentIntervalUnit): string => {
   if (unit === 'days') return `${value} dia${value === 1 ? '' : 's'}`;
   if (unit === 'weeks') return `${value} semana${value === 1 ? '' : 's'}`;
@@ -256,6 +312,202 @@ const recommendCadence = (serviceName: string): { value: number; unit: ClientAge
     return { value: 45, unit: 'days', rationale: 'Servico de manutencao com janela intermediaria.' };
   }
   return { value: 45, unit: 'days', rationale: 'Cadencia padrao sugerida para manter contato ativo.' };
+};
+
+const resolveAgentDecision = ({
+  summary,
+  requestedChannel,
+  queuedEvents,
+  pendingTasks,
+}: {
+  summary: ClientSummarySnapshot;
+  requestedChannel: ClientAgentChannel;
+  queuedEvents: number;
+  pendingTasks: number;
+}): AgentExecutionDecision => {
+  let tone: ClientTone = 'neutral';
+  let modeLabel = 'Monitoramento ativo';
+  let modeDetail = 'Cliente dentro de uma janela normal, com automacao focada em manutencao do ciclo.';
+  let urgencyScore = 28;
+
+  if (summary.totalSpent >= 1200) {
+    tone = 'vip';
+    modeLabel = 'Retencao VIP';
+    modeDetail = 'Protege valor da carteira, prioriza atendimento premium e antecipa o proximo movimento comercial.';
+    urgencyScore += 18;
+  } else if (summary.overdueRuleCount > 0 || (summary.dormancyDays !== null && summary.dormancyDays >= 60)) {
+    tone = 'risk';
+    modeLabel = 'Reativacao inteligente';
+    modeDetail = 'Motor entra em modo de recuperacao, identifica ausencia fora da janela ideal e sobe a urgencia.';
+    urgencyScore += 30;
+  } else if (summary.activeRuleCount > 0 || summary.nextReminder) {
+    tone = 'active';
+    modeLabel = 'Recorrencia orquestrada';
+    modeDetail = 'Fluxo continuo com trigger, janela, fila, tarefa e recalculo automatico da proxima recorrencia.';
+    urgencyScore += 16;
+  }
+
+  if (summary.dormancyDays !== null) {
+    if (summary.dormancyDays >= 120) urgencyScore += 20;
+    else if (summary.dormancyDays >= 90) urgencyScore += 14;
+    else if (summary.dormancyDays >= 45) urgencyScore += 8;
+  }
+
+  urgencyScore += Math.min(summary.overdueRuleCount * 8, 24);
+  urgencyScore += Math.min(summary.activeRuleCount * 2, 8);
+  urgencyScore -= Math.min((queuedEvents + pendingTasks) * 2, 12);
+  urgencyScore = clampNumber(urgencyScore, 12, 96);
+
+  let priority: AgentExecutionPriority = 'baixa';
+  let priorityLabel = 'Baixa prioridade';
+  if (urgencyScore >= 72) {
+    priority = 'alta';
+    priorityLabel = 'Alta prioridade';
+  } else if (urgencyScore >= 42) {
+    priority = 'media';
+    priorityLabel = 'Media prioridade';
+  }
+
+  const owner = requestedChannel === 'manual'
+    ? 'Central de relacionamento'
+    : requestedChannel === 'whatsapp'
+      ? 'Fila WhatsApp'
+      : 'Fila Email';
+
+  return {
+    tone,
+    modeLabel,
+    modeDetail,
+    priority,
+    priorityLabel,
+    owner,
+    channel: requestedChannel,
+    urgencyScore,
+    queuePressure: queuedEvents + pendingTasks,
+    rationale: `${modeLabel} com score ${urgencyScore}/100, ${queuedEvents} evento(s) na fila e ${pendingTasks} tarefa(s) pendente(s).`,
+  };
+};
+
+const buildAgentControlTower = ({
+  summary,
+  clientRules,
+  clientEvents,
+  clientTaskTimeline,
+  currentClient,
+  agentDraft,
+  agentPreviewReferenceDate,
+  agentPreviewNextDate,
+  decision,
+}: {
+  summary: ClientSummarySnapshot;
+  clientRules: ClientAgentRule[];
+  clientEvents: ClientAgentEvent[];
+  clientTaskTimeline: Record<string, unknown>[];
+  currentClient: ClientRecord;
+  agentDraft: AgentDraft;
+  agentPreviewReferenceDate: string;
+  agentPreviewNextDate: string;
+  decision: AgentExecutionDecision;
+}): AgentControlTower => {
+  const topService = summary.services[0]?.name || toStringValue(currentClient.preferred_service) || agentDraft.serviceName || 'Servico nao definido';
+  const serviceCadence = recommendCadence(topService);
+  const queuedEvents = clientEvents.filter((event) => event.status === 'queued').length;
+  const pendingTasks = clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length;
+
+  const channelLabel = agentDraft.channel === 'manual'
+    ? 'Operacao manual assistida'
+    : agentDraft.channel === 'whatsapp'
+      ? 'WhatsApp como canal primario'
+      : 'Email como canal primario';
+  const channelDetail = `${decision.priorityLabel} via ${decision.owner}. ${
+    agentDraft.channel === 'manual'
+      ? 'A IA prepara a rotina, mas a central valida o disparo final.'
+      : agentDraft.channel === 'whatsapp'
+        ? 'Prioriza contato rapido e personalizado, com fallback de tarefa quando necessario.'
+        : 'Usa mensagem mais estruturada e registra retorno em trilha operacional.'
+  }`;
+
+  const nodes: AgentPipelineNode[] = [
+    {
+      label: 'Trigger',
+      value: summary.nextReminder ? formatDate(summary.nextReminder) : formatDormancy(summary.dormancyDays),
+      detail: summary.nextReminder
+        ? `Janela aberta para ${topService}.`
+        : `Ultimo ponto conhecido em ${summary.lastVisit ? formatDate(summary.lastVisit.date) : '--'}.`,
+      tone: decision.tone,
+    },
+    {
+      label: 'Enriquecimento',
+      value: `${summary.visitCount} visitas`,
+      detail: `Ticket medio ${formatCurrency(summary.avgTicket)} | ancora ${topService} | score ${decision.urgencyScore}/100.`,
+      tone: summary.totalSpent > 0 ? 'active' : 'neutral',
+    },
+    {
+      label: 'Decisao',
+      value: decision.modeLabel,
+      detail: decision.modeDetail,
+      tone: decision.tone,
+    },
+    {
+      label: 'Dispatch',
+      value: formatDate(agentPreviewNextDate),
+      detail: `${decision.priorityLabel} | fila ${queuedEvents} | tarefas abertas ${pendingTasks} | owner ${decision.owner}.`,
+      tone: decision.priority === 'alta' ? 'risk' : queuedEvents > 0 || pendingTasks > 0 ? 'active' : 'neutral',
+    },
+  ];
+
+  const playbooks: AgentPlaybook[] = [
+    {
+      badge: 'Playbook 01',
+      title: 'Revisao de servico',
+      action: `Agendar retorno em ${formatInterval(serviceCadence.value, serviceCadence.unit)} para ${topService}.`,
+      rationale: serviceCadence.rationale,
+      tone: 'active',
+    },
+    {
+      badge: 'Playbook 02',
+      title: summary.dormancyDays !== null && summary.dormancyDays >= 60 ? 'Recuperacao de cliente' : 'Continuidade de ciclo',
+      action: summary.dormancyDays !== null && summary.dormancyDays >= 60
+        ? `Abrir reacendimento com prova social e oferta leve para quem esta sem retorno ha ${formatDormancy(summary.dormancyDays)}.`
+        : 'Usar mensagem consultiva para manter previsibilidade sem parecer cobranca mecanica.',
+      rationale: summary.overdueRuleCount > 0
+        ? `${summary.overdueRuleCount} aviso(s) ja ultrapassaram a janela.`
+        : 'Nenhuma quebra grave de janela detectada.',
+      tone: summary.dormancyDays !== null && summary.dormancyDays >= 60 ? 'risk' : 'neutral',
+    },
+    {
+      badge: 'Playbook 03',
+      title: summary.totalSpent >= 1200 ? 'Blindagem VIP' : 'Upsell contextual',
+      action: summary.totalSpent >= 1200
+        ? 'Priorizar atendimento humano, reforcar exclusividade e sugerir reserva antecipada.'
+        : `Quando ${topService} for o gatilho, sugerir complemento compativel com o perfil atual do cliente.`,
+      rationale: summary.totalSpent >= 1200
+        ? `Cliente ja movimentou ${formatCurrency(summary.totalSpent)} na carteira.`
+        : `Basear sugestao no historico das ${summary.visitCount} visitas confirmadas.`,
+      tone: summary.totalSpent >= 1200 ? 'vip' : 'neutral',
+    },
+  ];
+
+  const guardrails = [
+    `Referencia atual usada pelo agente: ${formatDate(agentPreviewReferenceDate)}.`,
+    `Regras mapeadas para este cliente: ${clientRules.length}, com ${summary.activeRuleCount} em operacao.`,
+    'Evita duplicidade de aviso para a mesma data antes de criar nova fila.',
+    'Toda execucao gera trilha operacional por tarefa e recalcula o proximo ciclo.',
+    `Motor decisor atual: ${decision.rationale}`,
+    agentDraft.channel === 'manual'
+      ? 'Fluxo exige revisao da central antes do contato final com a cliente.'
+      : `Canal ${agentDraft.channel} fica armado, mas a fila continua rastreada na central.`,
+  ];
+
+  return {
+    modeLabel: decision.modeLabel,
+    modeDetail: decision.modeDetail,
+    channelLabel,
+    channelDetail,
+    nodes,
+    playbooks,
+    guardrails,
+  };
 };
 
 const buildClientInsight = (
@@ -392,7 +644,7 @@ function ClienteModal({
     [clientId, events],
   );
 
-  const summary = useMemo(() => {
+  const summary = useMemo<ClientSummarySnapshot>(() => {
     const confirmed = bookings.filter(isRevenueBooking);
     const totalSpent = confirmed.reduce((sum, booking) => sum + getBookingTotal(booking), 0);
     const services = resolveServiceList(confirmed);
@@ -473,6 +725,41 @@ function ClienteModal({
     [agentDraft.messageTemplate, agentDraft.serviceName, agentPreviewNextDate, clientName],
   );
 
+  const agentExecutionDecision = useMemo(
+    () => resolveAgentDecision({
+      summary,
+      requestedChannel: agentDraft.channel,
+      queuedEvents: clientEvents.filter((event) => event.status === 'queued').length,
+      pendingTasks: clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length,
+    }),
+    [agentDraft.channel, clientEvents, clientTaskTimeline, summary],
+  );
+
+  const agentControlTower = useMemo(
+    () => buildAgentControlTower({
+      summary,
+      clientRules,
+      clientEvents,
+      clientTaskTimeline,
+      currentClient,
+      agentDraft,
+      agentPreviewReferenceDate,
+      agentPreviewNextDate,
+      decision: agentExecutionDecision,
+    }),
+    [
+      agentDraft,
+      agentExecutionDecision,
+      agentPreviewNextDate,
+      agentPreviewReferenceDate,
+      clientEvents,
+      clientRules,
+      clientTaskTimeline,
+      currentClient,
+      summary,
+    ],
+  );
+
   const handleSaveClient = async () => {
     if (!clientId) return;
     setSaving(true);
@@ -514,6 +801,17 @@ function ClienteModal({
 
     if (!serviceName || !Number.isFinite(intervalValue) || intervalValue < 1) {
       setAgentError('Informe servico e intervalo valido para programar o agente.');
+      return;
+    }
+
+    const duplicatedRule = rules.some((rule) => (
+      rule.clientId === clientId
+      && rule.enabled
+      && rule.serviceName.trim().toLowerCase() === serviceName.toLowerCase()
+      && rule.channel === agentDraft.channel
+    ));
+    if (duplicatedRule) {
+      setAgentError('Ja existe uma regra ativa para este servico e canal neste cliente.');
       return;
     }
 
@@ -576,8 +874,19 @@ function ClienteModal({
     try {
       const today = TODAY();
       const scheduledFor = isSameOrBefore(rule.nextRunDate, today) ? today : rule.nextRunDate;
+      const decision = resolveAgentDecision({
+        summary,
+        requestedChannel: rule.channel,
+        queuedEvents: events.filter((event) => event.status === 'queued').length,
+        pendingTasks: clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length,
+      });
       const duplicated = events.some((event) => event.ruleId === rule.id && event.scheduledFor === scheduledFor && event.status === 'queued');
-      if (duplicated) {
+      const duplicatedTask = clientTaskTimeline.some((task) => (
+        toStringValue(task.notes).includes(`rule:${rule.id}`)
+        && toStringValue(task.due_date) === scheduledFor
+        && toStringValue(task.status) !== 'concluida'
+      ));
+      if (duplicated || duplicatedTask) {
         const skippedEvent: ClientAgentEvent = {
           id: `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           ruleId: rule.id,
@@ -590,7 +899,7 @@ function ClienteModal({
           createdAt: new Date().toISOString(),
           taskId: null,
           status: 'skipped',
-          reason: 'Aviso ja existe para a mesma data.',
+          reason: duplicatedTask ? 'Tarefa operacional ja existe para a mesma data.' : 'Aviso ja existe para a mesma data.',
         };
         await onSaveAgentState(rules, [skippedEvent, ...events]);
         return;
@@ -605,13 +914,13 @@ function ClienteModal({
       const taskRow = await createWorkbenchEntityForAdmin(
         'tasks',
         {
-          title: `Aviso recorrencia: ${rule.clientName} - ${rule.serviceName}`,
-          owner: 'Agente de Clientes',
+          title: `${decision.priority === 'alta' ? 'Acao prioritaria' : 'Aviso recorrencia'}: ${rule.clientName} - ${rule.serviceName}`,
+          owner: decision.owner,
           due_date: scheduledFor,
-          priority: 'media',
+          priority: decision.priority,
           status: 'pendente',
           related_client: rule.clientName,
-          notes: `agente_cliente|rule:${rule.id}|cliente:${rule.clientId}|canal:${rule.channel}|mensagem:${preview}`,
+          notes: `agente_cliente|rule:${rule.id}|cliente:${rule.clientId}|canal:${decision.channel}|prioridade:${decision.priority}|score:${decision.urgencyScore}|modo:${decision.modeLabel}|mensagem:${preview}`,
         },
         adminKey,
       );
@@ -926,92 +1235,162 @@ function ClienteModal({
 
                 {activeTab === 'agente' && (
                   <div className="clientes-agent-layout">
-                    <section className="clientes-surface clientes-agent-lab">
-                      <div className="clientes-section-head">
-                        <div>
-                          <h4><Bot className="w-4 h-4" /> Laboratorio de recorrencia</h4>
-                          <p>Monte o comportamento do agente como simulacao interna do SaaS, com previsao por servico.</p>
+                    <div className="clientes-agent-mainstack">
+                      <section className="clientes-surface clientes-agent-console">
+                        <div className="clientes-section-head">
+                          <div>
+                            <h4><Bot className="w-4 h-4" /> Control tower do agente</h4>
+                            <p>Fluxo orquestrado em codigo: trigger, enriquecimento, decisao, dispatch e follow-up.</p>
+                          </div>
                         </div>
-                      </div>
 
-                      <div className="clientes-agent-scenarios">
-                        {serviceScenarios.length === 0 ? (
-                          <p className="clientes-empty">Sem dados suficientes para sugerir cadencia automatica ainda.</p>
-                        ) : (
-                          serviceScenarios.map((scenario) => (
-                            <button
-                              key={scenario.serviceName}
-                              type="button"
-                              className="clientes-scenario-card"
-                              onClick={() => setAgentDraft((current) => ({
-                                ...current,
-                                serviceName: scenario.serviceName,
-                                intervalValue: scenario.recommendation.value,
-                                intervalUnit: scenario.recommendation.unit,
-                              }))}
-                            >
-                              <strong>{scenario.serviceName}</strong>
-                              <span>{formatInterval(scenario.recommendation.value, scenario.recommendation.unit)}</span>
-                              <small>{scenario.recommendation.rationale}</small>
-                              <small>{scenario.lastDate ? `Ultimo servico em ${formatDate(scenario.lastDate)}` : 'Sem ultima data consolidada'}</small>
-                            </button>
-                          ))
-                        )}
-                      </div>
+                        <div className="clientes-agent-mode-grid">
+                          <article className={`clientes-agent-mode-card tone-${agentControlTower.nodes[2]?.tone || 'neutral'}`}>
+                            <span>Modo ativo</span>
+                            <strong>{agentControlTower.modeLabel}</strong>
+                            <small>{agentControlTower.modeDetail}</small>
+                          </article>
+                          <article className="clientes-agent-mode-card clientes-agent-mode-channel">
+                            <span>Canal e operacao</span>
+                            <strong>{agentControlTower.channelLabel}</strong>
+                            <small>{agentControlTower.channelDetail}</small>
+                          </article>
+                        </div>
 
-                      <div className="clientes-agent-preview">
-                        <div>
-                          <span>Referencia atual</span>
-                          <strong>{formatDate(agentPreviewReferenceDate)}</strong>
+                        <div className="clientes-agent-engine-grid">
+                          {agentControlTower.nodes.map((node) => (
+                            <article key={node.label} className={`clientes-agent-node tone-${node.tone}`}>
+                              <span>{node.label}</span>
+                              <strong>{node.value}</strong>
+                              <small>{node.detail}</small>
+                            </article>
+                          ))}
                         </div>
-                        <div>
-                          <span>Proxima execucao</span>
-                          <strong>{formatDate(agentPreviewNextDate)}</strong>
-                        </div>
-                        <div>
-                          <span>Mensagem gerada</span>
-                          <p>{agentPreviewMessage}</p>
-                        </div>
-                      </div>
 
-                      <div className="clientes-agent-form">
-                        <div>
-                          <label className="admin-label">Servico gatilho</label>
-                          <input className="admin-input" value={agentDraft.serviceName} onChange={(event) => setAgentDraft((current) => ({ ...current, serviceName: event.target.value }))} />
+                        <div className="clientes-agent-playbooks">
+                          {agentControlTower.playbooks.map((playbook) => (
+                            <article key={playbook.badge} className={`clientes-agent-playbook tone-${playbook.tone}`}>
+                              <div className="clientes-agent-playbook-head">
+                                <span>{playbook.badge}</span>
+                                {playbook.tone === 'vip' ? <Crown className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
+                              </div>
+                              <strong>{playbook.title}</strong>
+                              <p>{playbook.action}</p>
+                              <small>{playbook.rationale}</small>
+                            </article>
+                          ))}
                         </div>
-                        <div>
-                          <label className="admin-label">Intervalo</label>
-                          <input className="admin-input" type="number" min={1} value={agentDraft.intervalValue} onChange={(event) => setAgentDraft((current) => ({ ...current, intervalValue: Number(event.target.value) || 1 }))} />
-                        </div>
-                        <div>
-                          <label className="admin-label">Unidade</label>
-                          <select className="admin-input" value={agentDraft.intervalUnit} onChange={(event) => setAgentDraft((current) => ({ ...current, intervalUnit: event.target.value as ClientAgentIntervalUnit }))}>
-                            <option value="days">Dias</option>
-                            <option value="weeks">Semanas</option>
-                            <option value="months">Meses</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="admin-label">Canal</label>
-                          <select className="admin-input" value={agentDraft.channel} onChange={(event) => setAgentDraft((current) => ({ ...current, channel: event.target.value as ClientAgentChannel }))}>
-                            <option value="manual">Manual</option>
-                            <option value="whatsapp">WhatsApp</option>
-                            <option value="email">Email</option>
-                          </select>
-                        </div>
-                        <div className="clientes-edit-full">
-                          <label className="admin-label">Template</label>
-                          <textarea className="admin-input" rows={5} value={agentDraft.messageTemplate} onChange={(event) => setAgentDraft((current) => ({ ...current, messageTemplate: event.target.value }))} />
-                        </div>
-                      </div>
 
-                      <div className="clientes-inline-actions">
-                        <button type="button" className="admin-btn-primary" onClick={() => void handleCreateRule()}>
-                          <Send className="w-3.5 h-3.5" />
-                          Programar regra
-                        </button>
-                      </div>
-                    </section>
+                        <div className="clientes-agent-guardrails">
+                          <div className="clientes-section-head">
+                            <div>
+                              <h4><CheckCircle2 className="w-4 h-4" /> Guardrails</h4>
+                              <p>Camada de seguranca e consistencia do motor para nao virar automacao cega.</p>
+                            </div>
+                          </div>
+                          <div className="clientes-agent-guardrail-list">
+                            {agentControlTower.guardrails.map((guardrail) => (
+                              <article key={guardrail}>
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>{guardrail}</span>
+                              </article>
+                            ))}
+                          </div>
+                        </div>
+                      </section>
+
+                      <section className="clientes-surface clientes-agent-lab">
+                        <div className="clientes-section-head">
+                          <div>
+                            <h4><Sparkles className="w-4 h-4" /> Laboratorio de recorrencia</h4>
+                            <p>Monte o comportamento do agente com previsao por servico, janela, canal e payload final.</p>
+                          </div>
+                        </div>
+
+                        <div className="clientes-agent-scenarios">
+                          {serviceScenarios.length === 0 ? (
+                            <p className="clientes-empty">Sem dados suficientes para sugerir cadencia automatica ainda.</p>
+                          ) : (
+                            serviceScenarios.map((scenario) => (
+                              <button
+                                key={scenario.serviceName}
+                                type="button"
+                                className="clientes-scenario-card"
+                                onClick={() => setAgentDraft((current) => ({
+                                  ...current,
+                                  serviceName: scenario.serviceName,
+                                  intervalValue: scenario.recommendation.value,
+                                  intervalUnit: scenario.recommendation.unit,
+                                }))}
+                              >
+                                <strong>{scenario.serviceName}</strong>
+                                <span>{formatInterval(scenario.recommendation.value, scenario.recommendation.unit)}</span>
+                                <small>{scenario.recommendation.rationale}</small>
+                                <small>{scenario.lastDate ? `Ultimo servico em ${formatDate(scenario.lastDate)}` : 'Sem ultima data consolidada'}</small>
+                              </button>
+                            ))
+                          )}
+                        </div>
+
+                        <div className="clientes-agent-preview">
+                          <div>
+                            <span>Referencia atual</span>
+                            <strong>{formatDate(agentPreviewReferenceDate)}</strong>
+                          </div>
+                          <div>
+                            <span>Proxima execucao</span>
+                            <strong>{formatDate(agentPreviewNextDate)}</strong>
+                          </div>
+                          <div>
+                            <span>Mensagem gerada</span>
+                            <p>{agentPreviewMessage}</p>
+                          </div>
+                          <div>
+                            <span>Roteamento</span>
+                            <strong>{agentExecutionDecision.priorityLabel}</strong>
+                            <p>{agentExecutionDecision.modeLabel} | {agentExecutionDecision.owner}</p>
+                          </div>
+                        </div>
+
+                        <div className="clientes-agent-form">
+                          <div>
+                            <label className="admin-label">Servico gatilho</label>
+                            <input className="admin-input" value={agentDraft.serviceName} onChange={(event) => setAgentDraft((current) => ({ ...current, serviceName: event.target.value }))} />
+                          </div>
+                          <div>
+                            <label className="admin-label">Intervalo</label>
+                            <input className="admin-input" type="number" min={1} value={agentDraft.intervalValue} onChange={(event) => setAgentDraft((current) => ({ ...current, intervalValue: Number(event.target.value) || 1 }))} />
+                          </div>
+                          <div>
+                            <label className="admin-label">Unidade</label>
+                            <select className="admin-input" value={agentDraft.intervalUnit} onChange={(event) => setAgentDraft((current) => ({ ...current, intervalUnit: event.target.value as ClientAgentIntervalUnit }))}>
+                              <option value="days">Dias</option>
+                              <option value="weeks">Semanas</option>
+                              <option value="months">Meses</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="admin-label">Canal</label>
+                            <select className="admin-input" value={agentDraft.channel} onChange={(event) => setAgentDraft((current) => ({ ...current, channel: event.target.value as ClientAgentChannel }))}>
+                              <option value="manual">Manual</option>
+                              <option value="whatsapp">WhatsApp</option>
+                              <option value="email">Email</option>
+                            </select>
+                          </div>
+                          <div className="clientes-edit-full">
+                            <label className="admin-label">Template</label>
+                            <textarea className="admin-input" rows={5} value={agentDraft.messageTemplate} onChange={(event) => setAgentDraft((current) => ({ ...current, messageTemplate: event.target.value }))} />
+                          </div>
+                        </div>
+
+                        <div className="clientes-inline-actions">
+                          <button type="button" className="admin-btn-primary" onClick={() => void handleCreateRule()}>
+                            <Send className="w-3.5 h-3.5" />
+                            Programar regra
+                          </button>
+                        </div>
+                      </section>
+                    </div>
 
                     <section className="clientes-surface clientes-agent-pipeline">
                       <div className="clientes-section-head">
@@ -1656,39 +2035,53 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
                             onClick={() => setSelectedClient(item.client)}
                           >
                             <div className={`clientes-card-accent ${toneClass}`} />
-                            <div className="clientes-card-head">
-                              <div className={`clientes-card-avatar ${toneClass}`}>{getClientInitials(toStringValue(item.client.name))}</div>
-                              <div className="clientes-card-identity">
-                                <strong>{toStringValue(item.client.name) || 'Cliente sem nome'}</strong>
-                                <span><Phone className="w-3 h-3" /> {toStringValue(item.client.phone) || '--'}</span>
+                            <div className="clientes-card-static">
+                              <div className="clientes-card-head">
+                                <div className={`clientes-card-avatar ${toneClass}`}>{getClientInitials(toStringValue(item.client.name))}</div>
+                                <div className="clientes-card-identity">
+                                  <strong>{toStringValue(item.client.name) || 'Cliente sem nome'}</strong>
+                                  <span><Phone className="w-3 h-3" /> {toStringValue(item.client.phone) || '--'}</span>
+                                </div>
+                                <span className={`clientes-pill ${toneClass}`}>{item.insight.toneLabel}</span>
                               </div>
-                              <span className={`clientes-pill ${toneClass}`}>{item.insight.toneLabel}</span>
+
+                              <div className="clientes-card-quickline">
+                                <strong>{item.insight.topService}</strong>
+                                <span>
+                                  {item.insight.nextReminder
+                                    ? `Aviso em ${formatDate(item.insight.nextReminder)}`
+                                    : item.insight.activeRuleCount > 0
+                                      ? `${item.insight.activeRuleCount} regra(s) ativa(s)`
+                                      : 'Sem automacao ativa'}
+                                </span>
+                              </div>
                             </div>
 
-                            <div className="clientes-card-money">
-                              <strong>{formatCurrency(item.insight.totalSpent)}</strong>
-                              <span>{item.insight.visitCount} visita(s) confirmada(s)</span>
-                            </div>
+                            <div className="clientes-card-hover-panel">
+                              <div className="clientes-card-money">
+                                <strong>{formatCurrency(item.insight.totalSpent)}</strong>
+                                <span>{item.insight.visitCount} visita(s) confirmada(s)</span>
+                              </div>
 
-                            <div className="clientes-card-metrics">
-                              <article>
-                                <span>Ticket</span>
-                                <strong>{formatCurrency(item.insight.avgTicket)}</strong>
-                              </article>
-                              <article>
-                                <span>Sem retorno</span>
-                                <strong>{formatDormancy(item.insight.dormancyDays)}</strong>
-                              </article>
-                            </div>
+                              <div className="clientes-card-metrics">
+                                <article>
+                                  <span><Wallet className="w-3 h-3" /> Ticket</span>
+                                  <strong>{formatCurrency(item.insight.avgTicket)}</strong>
+                                </article>
+                                <article>
+                                  <span><Clock3 className="w-3 h-3" /> Sem retorno</span>
+                                  <strong>{formatDormancy(item.insight.dormancyDays)}</strong>
+                                </article>
+                              </div>
 
-                            <div className="clientes-card-tags">
-                              <span>{item.insight.topService}</span>
-                              <span>{item.insight.activeRuleCount > 0 ? `${item.insight.activeRuleCount} regra(s)` : 'Sem agente'}</span>
-                            </div>
+                              <div className="clientes-card-tags">
+                                <span>{item.insight.activeRuleCount > 0 ? `${item.insight.activeRuleCount} regra(s)` : 'Sem agente'}</span>
+                                <span>{item.insight.lastVisit ? `Ultima visita ${formatDate(item.insight.lastVisit)}` : 'Sem visita consolidada'}</span>
+                              </div>
 
-                            <div className="clientes-card-footer">
-                              <small>{item.insight.lastVisit ? `Ultima visita ${formatDate(item.insight.lastVisit)}` : 'Sem visita consolidada'}</small>
-                              <small>{item.insight.attentionLine}</small>
+                              <div className="clientes-card-footer">
+                                <small>{item.insight.attentionLine}</small>
+                              </div>
                             </div>
                           </button>
                         );
