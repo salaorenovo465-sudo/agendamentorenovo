@@ -175,10 +175,20 @@ adminRoutes.get('/bookings', async (req, res) => {
 
 adminRoutes.post('/bookings', async (req, res) => {
   const { service, servicePrice, date, time, name, phone } = req.body || {};
-  const serviceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
+  const serviceValue = typeof service === 'string' ? service.trim() : '';
+  const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
+  const customerName = typeof name === 'string' ? name.trim() : '';
+  const customerPhone = typeof phone === 'string' ? phone.trim() : '';
+  const normalizedTime = typeof time === 'string' ? time.slice(0, 5) : '';
+  const parsedServiceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
+  const serviceItems = parsedServiceItems.length > 0
+    ? parsedServiceItems
+    : serviceValue
+      ? [{ category: '', name: serviceValue, price: servicePriceValue || '' }]
+      : [];
   const professionalId = parseOptionalProfessionalId(req.body?.professionalId);
 
-  if (!service || !date || !time || !name || !phone) {
+  if (!serviceValue || !date || !normalizedTime || !customerName || !customerPhone) {
     return res.status(400).json({ error: 'Todos os campos sao obrigatorios.' });
   }
 
@@ -193,13 +203,13 @@ adminRoutes.post('/bookings', async (req, res) => {
   try {
     const professionalSelection = await resolveProfessionalSelection(professionalId);
     const booking = await bookingStore.create({
-      service: String(service).trim(),
-      servicePrice: typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null,
+      service: serviceValue,
+      servicePrice: servicePriceValue,
       serviceItems,
       date,
-      time: time.slice(0, 5),
-      name: String(name).trim(),
-      phone: String(phone).trim(),
+      time: normalizedTime,
+      name: customerName,
+      phone: customerPhone,
       professionalId: professionalSelection.professionalId,
       professionalName: professionalSelection.professionalName,
     });

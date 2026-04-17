@@ -398,10 +398,11 @@ class BookingStore {
       }
 
       if (this.supabaseEnabled && this.supabase) {
+        const normalizedServiceItems = input.serviceItems && input.serviceItems.length > 0 ? input.serviceItems : [];
         const payload = {
           service: input.service,
           service_price: input.servicePrice,
-          service_items: input.serviceItems && input.serviceItems.length > 0 ? input.serviceItems : null,
+          service_items: normalizedServiceItems,
           date: input.date,
           time: input.time,
           name: input.name,

@@ -178,9 +178,19 @@ publicRoutes.get('/availability', async (req, res) => {
 
 publicRoutes.post('/bookings', async (req, res) => {
   const { service, servicePrice, date, time, name, phone } = req.body;
-  const serviceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
+  const serviceValue = typeof service === 'string' ? service.trim() : '';
+  const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
+  const customerName = typeof name === 'string' ? name.trim() : '';
+  const customerPhone = typeof phone === 'string' ? phone.trim() : '';
+  const normalizedTime = typeof time === 'string' ? time.slice(0, 5) : '';
+  const parsedServiceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
+  const serviceItems = parsedServiceItems.length > 0
+    ? parsedServiceItems
+    : serviceValue
+      ? [{ category: '', name: serviceValue, price: servicePriceValue || '' }]
+      : [];
 
-  if (!service || !date || !time || !name || !phone) {
+  if (!serviceValue || !date || !normalizedTime || !customerName || !customerPhone) {
     return res.status(400).json({ error: 'Todos os campos são obrigatórios.' });
   }
 
@@ -188,11 +198,23 @@ publicRoutes.post('/bookings', async (req, res) => {
     return res.status(400).json({ error: 'Data inválida. Use YYYY-MM-DD.' });
   }
 
-  if (typeof time !== 'string' || !TIME_REGEX.test(time)) {
+  if (typeof time !== 'string' || !TIME_REGEX.test(normalizedTime)) {
     return res.status(400).json({ error: 'Horário inválido. Use HH:mm.' });
   }
 
   try {
+    const constraints = await getAvailabilityConstraints(date);
+    if (constraints.allowedSlots && !constraints.allowedSlots.has(normalizedTime)) {
+      return res.status(409).json({ error: 'Horario indisponivel pelas regras de disponibilidade.' });
+    }
+
+    if (constraints.limitPerDay) {
+      const bookingsOnDate = await bookingStore.countByDate(date);
+      if (bookingsOnDate >= constraints.limitPerDay) {
+        return res.status(409).json({ error: 'Limite de agendamentos do dia atingido.' });
+      }
+    }
+
     const remoteBusySlots = new Set<string>();
 
     try {
@@ -209,18 +231,18 @@ publicRoutes.post('/bookings', async (req, res) => {
       console.error('Erro ao validar conflito via Calendar API:', error);
     }
 
-    if (remoteBusySlots.has(time)) {
+    if (remoteBusySlots.has(normalizedTime)) {
       return res.status(409).json({ error: 'Horário indisponível na agenda.' });
     }
 
     const booking = await bookingStore.create({
-      service: String(service),
-      servicePrice: typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null,
+      service: serviceValue,
+      servicePrice: servicePriceValue,
       serviceItems,
       date,
-      time,
-      name: String(name),
-      phone: String(phone),
+      time: normalizedTime,
+      name: customerName,
+      phone: customerPhone,
     });
 
     const thread = await inboxStore.ensureThread(booking.phone, booking.name);
