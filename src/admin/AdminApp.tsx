@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import './admin.css';
 import {
   BarChart3,
@@ -71,7 +71,6 @@ import { CrudTab } from './CrudTab';
 import { DashboardTab } from './tabs/DashboardTab';
 import { AgendaTab } from './tabs/AgendaTab';
 import { ServicosTab } from './tabs/ServicosTab';
-import { ClientesTab } from './tabs/ClientesTab';
 import { TarefasTab } from './tabs/TarefasTab';
 import { ProfissionaisTab } from './tabs/ProfissionaisTab';
 import { DisponibilidadeTab } from './tabs/DisponibilidadeTab';
@@ -79,6 +78,7 @@ import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 
 const WHATSAPP_WORKSPACE_ENABLED = import.meta.env.VITE_WHATSAPP_WORKSPACE_ENABLED === 'true';
+const ClientesModule = lazy(() => import('./clientes/ClientesModule'));
 
 export default function AdminApp() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
@@ -118,7 +118,6 @@ export default function AdminApp() {
   });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [selectedClient, setSelectedClient] = useState<Record<string, unknown> | null>(null);
   const [showNewTask, setShowNewTask] = useState(false);
   const [showNewProf, setShowNewProf] = useState(false);
   const [selectedProf, setSelectedProf] = useState<Record<string, unknown> | null>(null);
@@ -341,7 +340,7 @@ export default function AdminApp() {
   useEffect(() => {
     if (!adminKey) return;
     const entity = ENTITY_BY_TAB[activeTab];
-    if (entity) {
+    if (entity && entity !== 'clients') {
       void loadEntity(entity);
     }
   }, [activeTab, adminKey]);
@@ -879,7 +878,7 @@ export default function AdminApp() {
               void loadBookings();
               void loadOverview();
               const entity = ENTITY_BY_TAB[activeTab];
-              if (entity) {
+              if (entity && entity !== 'clients') {
                 void loadEntity(entity);
               }
             }}
@@ -1001,15 +1000,12 @@ export default function AdminApp() {
           )}
 
           {activeTab === 'clientes' && (
-            <ClientesTab
-              clients={entityRows.clients}
-              loading={entityLoading.clients}
-              selectedClient={selectedClient}
-              setSelectedClient={setSelectedClient}
-              adminKey={adminKey}
-              onCreateEntity={handleCreateEntity}
-              onLoadEntity={(entity) => { void loadEntity(entity); }}
-            />
+            <Suspense fallback={<div style={{ fontSize: 13, color: 'var(--admin-text-muted)', padding: '14px 4px' }}>Carregando modulo de clientes...</div>}>
+              <ClientesModule
+                adminKey={adminKey}
+                tenantSlug={activeTenant}
+              />
+            </Suspense>
           )}
 
           {activeTab === 'tarefas' && (

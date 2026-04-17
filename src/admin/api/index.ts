@@ -72,3 +72,14 @@ export {
   createAdminTenant,
   updateAdminTenant,
 } from './settingsApi';
+
+export {
+  getClientAgentStateForAdmin,
+  saveClientAgentStateForAdmin,
+} from './clientAgentApi';
+export type {
+  ClientAgentRule,
+  ClientAgentEvent,
+  ClientAgentIntervalUnit,
+  ClientAgentChannel,
+} from './clientAgentApi';
