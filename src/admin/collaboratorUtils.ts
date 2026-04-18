@@ -1,10 +1,14 @@
 import type { AdminBooking, AdminBookingServiceItem } from './types';
 
 export type ServiceCatalogItem = {
+  id?: number;
   name: string;
   price: string;
   desc?: string;
   image?: string;
+  durationMin?: number;
+  active?: boolean;
+  persisted?: boolean;
 };
 
 export type ServiceCatalogCategory = {

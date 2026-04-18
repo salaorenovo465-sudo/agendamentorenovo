@@ -76,9 +76,110 @@ import { ProfissionaisTab } from './tabs/ProfissionaisTab';
 import { DisponibilidadeTab } from './tabs/DisponibilidadeTab';
 import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
+import type { ServiceCatalogCategory, ServiceCatalogItem } from './collaboratorUtils';
 
 const WHATSAPP_WORKSPACE_ENABLED = import.meta.env.VITE_WHATSAPP_WORKSPACE_ENABLED === 'true';
 const ClientesModule = lazy(() => import('./clientes/ClientesModule'));
+
+const cloneServiceCatalog = (catalog: ServiceCatalogCategory[]): ServiceCatalogCategory[] =>
+  catalog.map((category) => ({
+    ...category,
+    items: category.items.map((item) => ({ ...item })),
+  }));
+
+const DEFAULT_SERVICE_CATALOG = cloneServiceCatalog(publicServicesOriginal as ServiceCatalogCategory[]);
+
+const normalizeCatalogKey = (value: string): string => value.trim().toLocaleLowerCase('pt-BR');
+
+const parseServiceNumber = (value: unknown): number | null => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim().replace(/\./g, '').replace(',', '.');
+    if (!normalized) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+};
+
+const formatServicePrice = (value: unknown): string => {
+  const parsed = parseServiceNumber(value);
+  if (parsed === null || parsed <= 0) {
+    return 'Sob consulta';
+  }
+
+  return parsed.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
+const mergeServiceCatalog = (
+  baseCatalog: ServiceCatalogCategory[],
+  rows: Record<string, unknown>[],
+): ServiceCatalogCategory[] => {
+  const catalog = cloneServiceCatalog(baseCatalog);
+  const categoryMap = new Map<string, ServiceCatalogCategory>();
+
+  catalog.forEach((category) => {
+    const normalizedCategory = normalizeCatalogKey(category.category);
+    category.items = category.items.map((item) => ({ ...item, persisted: Boolean(item.persisted || item.id) }));
+    categoryMap.set(normalizedCategory, category);
+  });
+
+  rows.forEach((row) => {
+    const serviceName = toStringValue(row.name).trim();
+    if (!serviceName) {
+      return;
+    }
+
+    const categoryName = toStringValue(row.category).trim() || 'Sem categoria';
+    const normalizedCategory = normalizeCatalogKey(categoryName);
+    const normalizedService = normalizeCatalogKey(serviceName);
+
+    let category = categoryMap.get(normalizedCategory);
+    if (!category) {
+      category = { category: categoryName, items: [] };
+      categoryMap.set(normalizedCategory, category);
+      catalog.push(category);
+    }
+
+    const persistedItem: ServiceCatalogItem = {
+      id: parseServiceNumber(row.id) ?? undefined,
+      name: serviceName,
+      price: formatServicePrice(row.price),
+      desc: toStringValue(row.description).trim(),
+      durationMin: parseServiceNumber(row.duration_min) ?? undefined,
+      active: row.active !== false && row.active !== 'false',
+      persisted: true,
+    };
+
+    const existingIndex = category.items.findIndex((item) => normalizeCatalogKey(item.name) === normalizedService);
+    if (existingIndex >= 0) {
+      category.items[existingIndex] = {
+        ...category.items[existingIndex],
+        ...persistedItem,
+      };
+      return;
+    }
+
+    category.items.push(persistedItem);
+  });
+
+  return catalog.map((category) => ({
+    ...category,
+    items: [...category.items].sort((left, right) => left.name.localeCompare(right.name, 'pt-BR')),
+  }));
+};
 
 export default function AdminApp() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
@@ -124,8 +225,7 @@ export default function AdminApp() {
   const [editingProf, setEditingProf] = useState<Record<string, unknown>>({});
   const [showNewRule, setShowNewRule] = useState(false);
   const [analyticsSubTab, setAnalyticsSubTab] = useState<'geral' | 'colaboradores'>('geral');
-  const [localServices, setLocalServices] = useState(() => publicServicesOriginal.map((cat) => ({ ...cat, items: cat.items.map((item) => ({ ...item })) })));
-  const [editingService, setEditingService] = useState<{ catIdx: number; itemIdx: number; name: string; price: string; desc: string; priceType: 'fixed' | 'from' | 'consult'; priceValue: string } | null>(null);
+  const [localServices, setLocalServices] = useState<ServiceCatalogCategory[]>(() => cloneServiceCatalog(DEFAULT_SERVICE_CATALOG));
 
   const [settings, setSettings] = useState<AdminSettings>({});
   const [savingSettings, setSavingSettings] = useState(false);
@@ -330,7 +430,12 @@ export default function AdminApp() {
     void loadAllBookings();
     void loadEntity('clients');
     void loadEntity('professionals');
+    void loadEntity('services');
   }, [adminKey]);
+
+  useEffect(() => {
+    setLocalServices(mergeServiceCatalog(DEFAULT_SERVICE_CATALOG, entityRows.services));
+  }, [entityRows.services]);
 
   useEffect(() => {
     if (!adminKey) return;
@@ -1000,8 +1105,10 @@ export default function AdminApp() {
             <ServicosTab
               localServices={localServices}
               setLocalServices={setLocalServices}
-              editingService={editingService}
-              setEditingService={setEditingService}
+              loading={entityLoading.services}
+              onCreateService={(payload) => handleCreateEntity('services', payload)}
+              onUpdateService={(id, payload) => handleUpdateEntity('services', id, payload)}
+              onDeleteService={(id) => handleDeleteEntity('services', id)}
             />
           )}
 
