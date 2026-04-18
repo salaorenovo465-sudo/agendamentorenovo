@@ -23,6 +23,7 @@ export const requestAdmin = async <T>(
 ): Promise<T> => {
   const response = await fetch(apiUrl(path), {
     ...options,
+    cache: options.cache || 'no-store',
     headers: {
       'Content-Type': 'application/json',
       'x-admin-key': adminKey,
