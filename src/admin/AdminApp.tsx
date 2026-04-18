@@ -97,7 +97,8 @@ const parseServiceNumber = (value: unknown): number | null => {
   }
 
   if (typeof value === 'string') {
-    const normalized = value.trim().replace(/\./g, '').replace(',', '.');
+    const match = value.match(/[\d.,]+/);
+    const normalized = (match ? match[0] : value).trim().replace(/\.(?=\d{3}(\D|$))/g, '').replace(',', '.');
     if (!normalized) {
       return null;
     }
@@ -123,18 +124,24 @@ const formatServicePrice = (value: unknown): string => {
   });
 };
 
-const mergeServiceCatalog = (
-  baseCatalog: ServiceCatalogCategory[],
-  rows: Record<string, unknown>[],
-): ServiceCatalogCategory[] => {
-  const catalog = cloneServiceCatalog(baseCatalog);
-  const categoryMap = new Map<string, ServiceCatalogCategory>();
+const buildServicePayloadFromCatalogItem = (
+  categoryName: string,
+  service: ServiceCatalogItem,
+): Record<string, unknown> => ({
+  category: categoryName.trim(),
+  name: service.name.trim(),
+  duration_min: Math.max(5, service.durationMin || 60),
+  price: (() => {
+    const parsed = parseServiceNumber(service.price);
+    return parsed !== null && parsed > 0 ? parsed : 0;
+  })(),
+  description: (service.desc || '').trim(),
+  active: service.active !== false,
+});
 
-  catalog.forEach((category) => {
-    const normalizedCategory = normalizeCatalogKey(category.category);
-    category.items = category.items.map((item) => ({ ...item, persisted: Boolean(item.persisted || item.id) }));
-    categoryMap.set(normalizedCategory, category);
-  });
+const buildPersistedServiceCatalog = (rows: Record<string, unknown>[]): ServiceCatalogCategory[] => {
+  const catalog: ServiceCatalogCategory[] = [];
+  const categoryMap = new Map<string, ServiceCatalogCategory>();
 
   rows.forEach((row) => {
     const serviceName = toStringValue(row.name).trim();
@@ -434,8 +441,13 @@ export default function AdminApp() {
   }, [adminKey]);
 
   useEffect(() => {
-    setLocalServices(mergeServiceCatalog(DEFAULT_SERVICE_CATALOG, entityRows.services));
-  }, [entityRows.services]);
+    const serviceCatalogManaged = settings.serviceCatalogManaged === true || entityRows.services.length > 0;
+    setLocalServices(
+      serviceCatalogManaged
+        ? buildPersistedServiceCatalog(entityRows.services)
+        : cloneServiceCatalog(DEFAULT_SERVICE_CATALOG),
+    );
+  }, [entityRows.services, settings.serviceCatalogManaged]);
 
   useEffect(() => {
     if (!adminKey) return;
@@ -754,6 +766,42 @@ export default function AdminApp() {
     if (entity === 'finance' || entity === 'tasks' || entity === 'leads') {
       await loadOverview();
     }
+  };
+
+  const handleServiceCatalogBootstrap = async (catalog: ServiceCatalogCategory[]) => {
+    if (!adminKey) return;
+
+    const existingIds = entityRows.services
+      .map((row) => parseServiceNumber(row.id))
+      .filter((value): value is number => value !== null);
+
+    for (const id of existingIds) {
+      await deleteWorkbenchEntityForAdmin('services', id, adminKey);
+    }
+
+    for (const category of catalog) {
+      for (const service of category.items) {
+        await createWorkbenchEntityForAdmin('services', buildServicePayloadFromCatalogItem(category.category, service), adminKey);
+      }
+    }
+
+    const savedSettings = await saveAdminSettings(
+      { ...settings, serviceCatalogManaged: true },
+      adminKey,
+      activeTenant,
+    );
+    setSettings(savedSettings);
+    await loadEntity('services');
+  };
+
+  const handleDeleteServiceCategory = async (serviceIds: number[]) => {
+    if (!adminKey) return;
+
+    for (const id of serviceIds) {
+      await deleteWorkbenchEntityForAdmin('services', id, adminKey);
+    }
+
+    await loadEntity('services');
   };
 
   const handleResetFinance = async (password: string, date?: string): Promise<boolean> => {
@@ -1104,11 +1152,13 @@ export default function AdminApp() {
           {activeTab === 'servicos' && (
             <ServicosTab
               localServices={localServices}
-              setLocalServices={setLocalServices}
               loading={entityLoading.services}
+              managedCatalog={settings.serviceCatalogManaged === true || entityRows.services.length > 0}
               onCreateService={(payload) => handleCreateEntity('services', payload)}
               onUpdateService={(id, payload) => handleUpdateEntity('services', id, payload)}
               onDeleteService={(id) => handleDeleteEntity('services', id)}
+              onDeleteCategory={handleDeleteServiceCategory}
+              onBootstrapCatalog={handleServiceCatalogBootstrap}
             />
           )}
 

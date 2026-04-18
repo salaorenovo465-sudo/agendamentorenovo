@@ -163,6 +163,7 @@ export type AdminSettings = {
   whatsappOpenTime?: string;
   whatsappCloseTime?: string;
   masterPasswordUpdatedAt?: string;
+  serviceCatalogManaged?: boolean;
   whatsappProvider?: 'chatwoot' | 'legacy' | 'baileys';
   chatwootUrl?: string;
   chatwootAccountId?: string;

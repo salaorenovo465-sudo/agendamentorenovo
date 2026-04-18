@@ -17,6 +17,7 @@ const BASIC_PLATFORM_SETTINGS_KEYS = [
   'whatsappOpenTime',
   'whatsappCloseTime',
   'masterPasswordUpdatedAt',
+  'serviceCatalogManaged',
 ] as const;
 
 const MASTER_PASSWORD_MIN_LENGTH = 4;
