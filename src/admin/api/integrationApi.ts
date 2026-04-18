@@ -2,6 +2,7 @@ import type {
   AdminEvolutionInstanceStatus,
   AdminEvolutionIntegrationSavePayload,
   AdminEvolutionIntegrationState,
+  AdminEvolutionTestMessageResult,
   AdminEvolutionIntegrationTestResult,
 } from '../types';
 import { requestAdmin, withTenantQuery } from './apiCore';
@@ -101,4 +102,25 @@ export const refreshEvolutionInstanceQrForAdmin = async (
   );
 
   return response.status;
+};
+
+export const sendEvolutionTestMessageForAdmin = async (
+  adminKey: string,
+  payload: {
+    phone: string;
+    text: string;
+    settings?: Partial<AdminEvolutionIntegrationSavePayload>;
+  },
+  tenantSlug?: string,
+): Promise<AdminEvolutionTestMessageResult> => {
+  const response = await requestAdmin<{ result: AdminEvolutionTestMessageResult }>(
+    withTenantQuery('/api/admin/workbench/settings/integrations/evolution/test-message', tenantSlug),
+    adminKey,
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  );
+
+  return response.result;
 };

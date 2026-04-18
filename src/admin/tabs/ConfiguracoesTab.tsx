@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import {
+  Activity,
+  AlertTriangle,
   BadgeCheck,
   Building2,
+  CheckCircle2,
+  Copy,
   KeyRound,
   Link2,
   PlugZap,
   QrCode,
   RadioTower,
+  RefreshCw,
+  Send,
   Settings2,
   ShieldCheck,
   Sparkles,
@@ -19,11 +25,15 @@ import {
   getEvolutionIntegrationForAdmin,
   refreshEvolutionInstanceQrForAdmin,
   saveEvolutionIntegrationForAdmin,
+  sendEvolutionTestMessageForAdmin,
   testEvolutionIntegrationForAdmin,
 } from '../api/integrationApi';
 import type {
+  AdminEvolutionChecklistItem,
+  AdminEvolutionIntegrationDiagnostics,
   AdminEvolutionIntegrationState,
   AdminEvolutionIntegrationTestResult,
+  AdminEvolutionTestMessageResult,
   AdminSettings,
   AdminTenant,
 } from '../types';
@@ -53,7 +63,7 @@ const SETTINGS_SECTIONS: Array<{
   {
     id: 'integracoes',
     label: 'Integracoes',
-    description: 'Cards com conexao pratica e status vivo.',
+    description: 'Conexao, diagnostico e operacao tecnica.',
   },
   {
     id: 'seguranca',
@@ -78,6 +88,28 @@ const humanizeConnectionState = (value: string): string => {
   if (value === 'missing') return 'Nao criada';
   return 'Indefinida';
 };
+
+const humanizeOverallStatus = (value: AdminEvolutionIntegrationDiagnostics['overallStatus'] | undefined): string => {
+  if (value === 'ready') return 'Pronta';
+  if (value === 'attention') return 'Atencao';
+  if (value === 'error') return 'Erro';
+  return 'Nao configurada';
+};
+
+const overallStatusTone = (value: AdminEvolutionIntegrationDiagnostics['overallStatus'] | undefined): 'ok' | 'warn' | 'error' => {
+  if (value === 'ready') return 'ok';
+  if (value === 'attention') return 'warn';
+  return 'error';
+};
+
+const checklistTone = (status: AdminEvolutionChecklistItem['status']): 'ok' | 'warn' | 'error' | 'pending' => status;
+
+const getChecklistSummary = (items: AdminEvolutionChecklistItem[]) => ({
+  ok: items.filter((item) => item.status === 'ok').length,
+  warn: items.filter((item) => item.status === 'warn').length,
+  error: items.filter((item) => item.status === 'error').length,
+  pending: items.filter((item) => item.status === 'pending').length,
+});
 
 export function ConfiguracoesTab({
   adminKey,
@@ -130,11 +162,22 @@ export function ConfiguracoesTab({
   const [integrationState, setIntegrationState] = useState<AdminEvolutionIntegrationState | null>(null);
   const [integrationTestResult, setIntegrationTestResult] = useState<AdminEvolutionIntegrationTestResult | null>(null);
   const [evolutionForm, setEvolutionForm] = useState<EvolutionFormState>(() => buildEmptyEvolutionForm());
+  const [testMessagePhone, setTestMessagePhone] = useState('');
+  const [testMessageText, setTestMessageText] = useState('Ola, este e um teste operacional da Evolution API na central Renovo.');
+  const [testMessageSending, setTestMessageSending] = useState(false);
+  const [testMessageResult, setTestMessageResult] = useState<AdminEvolutionTestMessageResult | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState('');
 
   const companyName = useMemo(() => {
     const value = typeof settings.companyName === 'string' ? settings.companyName.trim() : '';
     return value || tenants.find((tenant) => tenant.slug === activeTenant)?.name || 'Empresa';
   }, [activeTenant, settings.companyName, tenants]);
+
+  const integrationDiagnostics = integrationState?.diagnostics || null;
+  const checklistSummary = useMemo(
+    () => getChecklistSummary(integrationDiagnostics?.checklist || []),
+    [integrationDiagnostics?.checklist],
+  );
 
   const integrationConfigured = integrationState?.integration.configured === true;
   const integrationConnected = integrationState?.status.connected === true;
@@ -181,6 +224,9 @@ export function ConfiguracoesTab({
     setIntegrationTestResult(null);
     setIntegrationState(null);
     setEvolutionForm(buildEmptyEvolutionForm());
+    setTestMessagePhone('');
+    setTestMessageResult(null);
+    setCopyFeedback('');
   }, [activeTenant]);
 
   useEffect(() => {
@@ -191,6 +237,19 @@ export function ConfiguracoesTab({
     void loadEvolutionIntegration();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSection, activeTenant]);
+
+  useEffect(() => {
+    if (activeSection !== 'integracoes' || !integrationPanelOpen) {
+      return;
+    }
+
+    const handle = window.setInterval(() => {
+      void loadEvolutionIntegration();
+    }, 15000);
+
+    return () => window.clearInterval(handle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, integrationPanelOpen, activeTenant]);
 
   const handleMasterPasswordUpdate = async () => {
     setMasterPasswordError('');
@@ -243,6 +302,7 @@ export function ConfiguracoesTab({
     setIntegrationError('');
     setIntegrationSuccess('');
     setIntegrationTestResult(null);
+    setTestMessageResult(null);
 
     setIntegrationSaving(true);
     try {
@@ -280,24 +340,26 @@ export function ConfiguracoesTab({
     }
   };
 
+  const stagedSettings = useMemo(
+    () => ({
+      evolutionUrl: evolutionForm.evolutionUrl.trim(),
+      evolutionInstance: evolutionForm.evolutionInstance.trim(),
+      evolutionSendPath: evolutionForm.evolutionSendPath.trim() || DEFAULT_EVOLUTION_SEND_PATH,
+      evolutionApiKey: evolutionForm.evolutionApiKey.trim() || undefined,
+      evolutionWebhookSecret: evolutionForm.evolutionWebhookSecret.trim() || undefined,
+    }),
+    [evolutionForm.evolutionApiKey, evolutionForm.evolutionInstance, evolutionForm.evolutionSendPath, evolutionForm.evolutionUrl, evolutionForm.evolutionWebhookSecret],
+  );
+
   const handleTestEvolutionIntegration = async () => {
     setIntegrationTesting(true);
     setIntegrationError('');
     setIntegrationSuccess('');
 
     try {
-      const result = await testEvolutionIntegrationForAdmin(
-        adminKey,
-        {
-          evolutionUrl: evolutionForm.evolutionUrl.trim(),
-          evolutionInstance: evolutionForm.evolutionInstance.trim(),
-          evolutionSendPath: evolutionForm.evolutionSendPath.trim() || DEFAULT_EVOLUTION_SEND_PATH,
-          evolutionApiKey: evolutionForm.evolutionApiKey.trim() || undefined,
-          evolutionWebhookSecret: evolutionForm.evolutionWebhookSecret.trim() || undefined,
-        },
-        activeTenant,
-      );
+      const result = await testEvolutionIntegrationForAdmin(adminKey, stagedSettings, activeTenant);
       setIntegrationTestResult(result);
+      setIntegrationState((current) => current ? { ...current, diagnostics: result.diagnostics } : current);
       if (result.ok) {
         setIntegrationSuccess('A Evolution respondeu e a instancia configurada foi localizada.');
       } else {
@@ -311,9 +373,7 @@ export function ConfiguracoesTab({
     }
   };
 
-  const runEvolutionInstanceAction = async (
-    action: 'create' | 'qr' | 'refresh',
-  ) => {
+  const runEvolutionInstanceAction = async (action: 'create' | 'qr' | 'refresh') => {
     setIntegrationAction(action);
     setIntegrationError('');
     setIntegrationSuccess('');
@@ -341,6 +401,24 @@ export function ConfiguracoesTab({
                 webhookSecretPreview: null,
               },
               status: payload,
+              diagnostics: {
+                checkedAt: new Date().toISOString(),
+                tenantSlug: activeTenant,
+                overallStatus: 'attention',
+                readinessScore: 0,
+                apiReachable: false,
+                secureUrl: false,
+                sendPathResolved: DEFAULT_EVOLUTION_SEND_PATH,
+                sendUrlPreview: null,
+                webhookUrl: null,
+                instanceFound: payload.exists,
+                availableInstances: [],
+                instancesCount: 0,
+                checklist: [],
+                issues: [],
+                warnings: [],
+                recommendations: [],
+              },
             },
       );
 
@@ -352,10 +430,53 @@ export function ConfiguracoesTab({
             : 'QR atualizado com sucesso.',
       );
       setIntegrationPanelOpen(true);
+      await loadEvolutionIntegration();
     } catch (error) {
       setIntegrationError(error instanceof Error ? error.message : 'Erro ao operar a instancia Evolution.');
     } finally {
       setIntegrationAction(null);
+    }
+  };
+
+  const handleSendEvolutionTestMessage = async () => {
+    setIntegrationError('');
+    setIntegrationSuccess('');
+    setTestMessageResult(null);
+
+    setTestMessageSending(true);
+    try {
+      const result = await sendEvolutionTestMessageForAdmin(
+        adminKey,
+        {
+          phone: testMessagePhone.trim(),
+          text: testMessageText.trim(),
+          settings: stagedSettings,
+        },
+        activeTenant,
+      );
+
+      setTestMessageResult(result);
+      setIntegrationSuccess(`Mensagem de teste enviada para ${result.normalizedPhone}.`);
+      await loadEvolutionIntegration();
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Erro ao enviar mensagem de teste.');
+    } finally {
+      setTestMessageSending(false);
+    }
+  };
+
+  const handleCopyValue = async (value: string, label: string) => {
+    if (!value || typeof navigator === 'undefined' || !navigator.clipboard) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyFeedback(`${label} copiado.`);
+      window.setTimeout(() => setCopyFeedback(''), 2200);
+    } catch {
+      setCopyFeedback(`Nao foi possivel copiar ${label.toLowerCase()}.`);
+      window.setTimeout(() => setCopyFeedback(''), 2200);
     }
   };
 
@@ -426,13 +547,42 @@ export function ConfiguracoesTab({
     </div>
   );
 
+  const renderDiagnosticIssueList = (title: string, items: string[], tone: 'issue' | 'warning' | 'hint') => {
+    if (items.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className={`settings-diagnostic-list ${tone}`}>
+        <strong>{title}</strong>
+        <div>
+          {items.map((item) => (
+            <span key={item}>{item}</span>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const renderChecklistItem = (item: AdminEvolutionChecklistItem) => (
+    <div key={item.id} className={`settings-checklist-item ${checklistTone(item.status)}`}>
+      <div className="settings-checklist-icon">
+        {item.status === 'ok' ? <CheckCircle2 style={{ width: 16, height: 16 }} /> : item.status === 'warn' ? <AlertTriangle style={{ width: 16, height: 16 }} /> : item.status === 'pending' ? <Activity style={{ width: 16, height: 16 }} /> : <AlertTriangle style={{ width: 16, height: 16 }} />}
+      </div>
+      <div>
+        <strong>{item.label}</strong>
+        <p>{item.detail}</p>
+      </div>
+    </div>
+  );
+
   const renderIntegrationSection = () => (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <div className="settings-hero-card">
         <div>
           <span className="settings-section-kicker">Marketplace interno</span>
           <h3>Integracoes</h3>
-          <p>Cards com status vivo, CTA direto e fluxo de conexao no padrao de SaaS moderno.</p>
+          <p>Conexao, diagnostico, QR, checklist de prontidao e teste operacional real no mesmo workspace.</p>
         </div>
         <div className="settings-hero-chip">
           <Sparkles style={{ width: 16, height: 16 }} />
@@ -449,31 +599,31 @@ export function ConfiguracoesTab({
             <div className="settings-integration-copy">
               <span className="settings-integration-kicker">Canal do agente</span>
               <h4>Evolution API</h4>
-              <p>Envio direto das mensagens operacionais do agente de clientes usando qualquer conta da sua Evolution.</p>
+              <p>Conexao dedicada para disparos do agente, teste de envio e monitoramento tecnico por tenant.</p>
             </div>
-            <span className={`settings-integration-badge ${integrationConnected ? 'ok' : integrationConfigured ? 'warn' : ''}`}>{integrationBadge}</span>
+            <span className={`settings-integration-badge ${overallStatusTone(integrationDiagnostics?.overallStatus)}`}>{integrationBadge}</span>
           </div>
 
           <div className="settings-integration-metrics">
             <div>
-              <span>API</span>
-              <strong>{integrationConfigured ? 'Configurada' : 'Pendente'}</strong>
+              <span>Prontidao</span>
+              <strong>{integrationDiagnostics ? `${integrationDiagnostics.readinessScore}%` : '0%'}</strong>
             </div>
             <div>
               <span>Instancia</span>
               <strong>{integrationState?.status.instanceName || 'Nao definida'}</strong>
             </div>
             <div>
-              <span>Status</span>
-              <strong>{integrationState ? humanizeConnectionState(integrationState.status.connectionState) : 'Carregando'}</strong>
+              <span>Saude</span>
+              <strong>{humanizeOverallStatus(integrationDiagnostics?.overallStatus)}</strong>
             </div>
           </div>
 
           <div className="settings-integration-footer">
             <p>
               {integrationConnected
-                ? 'A conta ja esta pronta para o agente executar disparos reais.'
-                : 'Clique em conectar para cadastrar as credenciais e concluir o vinculo da instancia.'}
+                ? 'A conta esta vinculada e o agente pode operar pela Evolution.'
+                : 'Conecte a Evolution, valide a API e conclua a instancia para liberar o canal.'}
             </p>
             <button
               className={integrationConnected ? 'admin-btn-outline' : 'admin-btn-primary'}
@@ -488,28 +638,51 @@ export function ConfiguracoesTab({
 
       {integrationError && <p className="settings-inline-error">{integrationError}</p>}
       {integrationSuccess && <p className="settings-inline-success">{integrationSuccess}</p>}
+      {copyFeedback && <p className="settings-inline-success">{copyFeedback}</p>}
 
       {(integrationPanelOpen || integrationConnected || integrationConfigured) && (
         <div className="settings-integration-console">
           <div className="settings-integration-console-header">
             <div>
-              <span className="settings-section-kicker">Painel de conexao</span>
+              <span className="settings-section-kicker">Painel de operacao</span>
               <h4>Evolution API</h4>
-              <p>Configure credenciais, valide a conta e conclua o vinculo da instancia no mesmo painel.</p>
+              <p>Diagnostico em tempo real, checklist de prontidao, configuracao segura e teste real de envio.</p>
             </div>
-            <button className="admin-btn-outline" onClick={() => setIntegrationPanelOpen((current) => !current)}>
-              {integrationPanelOpen ? 'Recolher' : 'Expandir'}
-            </button>
+            <div className="settings-inline-actions">
+              <button className="admin-btn-outline" onClick={() => void loadEvolutionIntegration()} disabled={integrationLoading}>
+                {integrationLoading ? 'Atualizando...' : 'Atualizar status'}
+              </button>
+              <button className="admin-btn-outline" onClick={() => setIntegrationPanelOpen((current) => !current)}>
+                {integrationPanelOpen ? 'Recolher' : 'Expandir'}
+              </button>
+            </div>
           </div>
 
           {integrationPanelOpen && (
             <>
+              <div className="settings-health-band">
+                <div className={`settings-health-score ${overallStatusTone(integrationDiagnostics?.overallStatus)}`}>
+                  <span>Readiness score</span>
+                  <strong>{integrationDiagnostics ? `${integrationDiagnostics.readinessScore}%` : '0%'}</strong>
+                  <small>{humanizeOverallStatus(integrationDiagnostics?.overallStatus)}</small>
+                </div>
+                <div className="settings-health-progress">
+                  <div>
+                    <span>Checklist</span>
+                    <strong>{checklistSummary.ok} ok / {checklistSummary.warn} alerta / {checklistSummary.error} erro</strong>
+                  </div>
+                  <div className="settings-progress-bar">
+                    <span style={{ width: `${integrationDiagnostics?.readinessScore || 0}%` }} />
+                  </div>
+                </div>
+              </div>
+
               <div className="settings-integration-status-grid">
                 <div className="settings-status-card">
                   <Link2 style={{ width: 16, height: 16 }} />
                   <div>
                     <span>Conexao API</span>
-                    <strong>{integrationConfigured ? 'Mapeada' : 'Sem credencial'}</strong>
+                    <strong>{integrationDiagnostics?.apiReachable ? 'Respondendo' : integrationConfigured ? 'Mapeada' : 'Sem credencial'}</strong>
                   </div>
                 </div>
                 <div className="settings-status-card">
@@ -522,11 +695,53 @@ export function ConfiguracoesTab({
                 <div className="settings-status-card">
                   <BadgeCheck style={{ width: 16, height: 16 }} />
                   <div>
-                    <span>Modo do agente</span>
+                    <span>Canal do agente</span>
                     <strong>Evolution exclusiva</strong>
                   </div>
                 </div>
+                <div className="settings-status-card">
+                  <Activity style={{ width: 16, height: 16 }} />
+                  <div>
+                    <span>Instancias visiveis</span>
+                    <strong>{integrationDiagnostics?.instancesCount || 0}</strong>
+                  </div>
+                </div>
               </div>
+
+              <div className="settings-diagnostics-grid">
+                <div className="settings-diagnostic-card">
+                  <div className="settings-diagnostic-card-top">
+                    <strong>Rota de envio resolvida</strong>
+                    {integrationDiagnostics?.sendUrlPreview && (
+                      <button className="admin-btn-outline" onClick={() => void handleCopyValue(integrationDiagnostics.sendUrlPreview || '', 'URL de envio')}>
+                        <Copy style={{ width: 13, height: 13 }} />
+                        Copiar
+                      </button>
+                    )}
+                  </div>
+                  <p>{integrationDiagnostics?.sendUrlPreview || 'A rota final aparece aqui quando a URL e a instancia estiverem definidas.'}</p>
+                </div>
+                <div className="settings-diagnostic-card">
+                  <div className="settings-diagnostic-card-top">
+                    <strong>Webhook URL</strong>
+                    {integrationDiagnostics?.webhookUrl && (
+                      <button className="admin-btn-outline" onClick={() => void handleCopyValue(integrationDiagnostics.webhookUrl || '', 'Webhook URL')}>
+                        <Copy style={{ width: 13, height: 13 }} />
+                        Copiar
+                      </button>
+                    )}
+                  </div>
+                  <p>{integrationDiagnostics?.webhookUrl || 'Configure uma URL publica da aplicacao para gerar o endpoint do webhook.'}</p>
+                </div>
+              </div>
+
+              <div className="settings-checklist-grid">
+                {(integrationDiagnostics?.checklist || []).map(renderChecklistItem)}
+              </div>
+
+              {renderDiagnosticIssueList('Bloqueios atuais', integrationDiagnostics?.issues || [], 'issue')}
+              {renderDiagnosticIssueList('Pontos de atencao', integrationDiagnostics?.warnings || [], 'warning')}
+              {renderDiagnosticIssueList('Recomendacoes tecnicas', integrationDiagnostics?.recommendations || [], 'hint')}
 
               <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
                 <div>
@@ -565,7 +780,7 @@ export function ConfiguracoesTab({
                     placeholder={integrationState?.integration.hasWebhookSecret ? `Ja cadastrado: ${integrationState.integration.webhookSecretPreview}` : 'Opcional'}
                   />
                   <small className="settings-field-help">
-                    {integrationState?.integration.hasWebhookSecret ? 'Deixe vazio para manter o secret atual.' : 'Opcional para validacao futura de webhooks.'}
+                    {integrationState?.integration.hasWebhookSecret ? 'Deixe vazio para manter o secret atual.' : 'Opcional, mas recomendado para callbacks.'}
                   </small>
                 </div>
                 <div style={{ gridColumn: '1 / -1' }}>
@@ -580,7 +795,7 @@ export function ConfiguracoesTab({
                     />
                   </div>
                   <small className="settings-field-help">
-                    {integrationState?.integration.hasApiKey ? 'Deixe vazio para preservar a API Key atual.' : 'A API Key fica salva no tenant e nao volta aberta para a tela.'}
+                    {integrationState?.integration.hasApiKey ? 'Deixe vazio para preservar a API Key atual.' : 'A API Key fica mascarada no retorno e nao volta aberta para a tela.'}
                   </small>
                 </div>
               </div>
@@ -618,6 +833,65 @@ export function ConfiguracoesTab({
                   <span>{integrationState.status.lastError}</span>
                 </div>
               )}
+
+              {integrationDiagnostics?.availableInstances && integrationDiagnostics.availableInstances.length > 0 && (
+                <div className="settings-instance-list">
+                  <div className="settings-diagnostic-card-top">
+                    <strong>Instancias localizadas</strong>
+                    <span>{integrationDiagnostics.instancesCount} encontrada(s)</span>
+                  </div>
+                  <div className="settings-instance-pill-row">
+                    {integrationDiagnostics.availableInstances.map((instanceName) => (
+                      <span
+                        key={instanceName}
+                        className={`settings-instance-pill ${instanceName === integrationState?.status.instanceName ? 'active' : ''}`}
+                      >
+                        {instanceName}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="settings-test-message-card">
+                <div className="settings-diagnostic-card-top">
+                  <strong>Teste real de envio</strong>
+                  <span>Use as credenciais atuais ou as digitadas no formulario</span>
+                </div>
+                <div className="settings-test-message-grid">
+                  <div>
+                    <label className="admin-label">Telefone de teste</label>
+                    <input
+                      className="admin-input"
+                      value={testMessagePhone}
+                      onChange={(event) => setTestMessagePhone(event.target.value)}
+                      placeholder="+55 71 99999-9999"
+                    />
+                  </div>
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label className="admin-label">Mensagem</label>
+                    <textarea
+                      className="admin-input"
+                      rows={4}
+                      value={testMessageText}
+                      onChange={(event) => setTestMessageText(event.target.value)}
+                      placeholder="Mensagem operacional para validar a Evolution."
+                    />
+                  </div>
+                </div>
+                <div className="settings-inline-actions">
+                  <button className="admin-btn-primary" onClick={() => void handleSendEvolutionTestMessage()} disabled={testMessageSending}>
+                    <Send style={{ width: 14, height: 14 }} />
+                    {testMessageSending ? 'Enviando...' : 'Enviar teste'}
+                  </button>
+                </div>
+                {testMessageResult && (
+                  <div className="settings-test-result ok">
+                    <strong>Teste enviado</strong>
+                    <span>Destino normalizado: {testMessageResult.normalizedPhone} | provider id: {testMessageResult.providerMessageId || 'nao informado'}</span>
+                  </div>
+                )}
+              </div>
 
               {integrationState?.status.qrDataUrl ? (
                 <div className="settings-qr-shell">
@@ -741,7 +1015,11 @@ export function ConfiguracoesTab({
             onClick={() => setActiveSection(section.id)}
           >
             <span className="settings-section-tab-icon">
-              {section.id === 'geral' ? <Settings2 style={{ width: 15, height: 15 }} /> : section.id === 'integracoes' ? <PlugZap style={{ width: 15, height: 15 }} /> : <ShieldCheck style={{ width: 15, height: 15 }} />}
+              {section.id === 'geral'
+                ? <Settings2 style={{ width: 15, height: 15 }} />
+                : section.id === 'integracoes'
+                  ? <PlugZap style={{ width: 15, height: 15 }} />
+                  : <ShieldCheck style={{ width: 15, height: 15 }} />}
             </span>
             <span>
               <strong>{section.label}</strong>

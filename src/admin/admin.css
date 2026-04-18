@@ -2344,6 +2344,11 @@
   background: rgba(16,185,129,0.09);
   color: #047857;
 }
+.settings-inline-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .settings-integration-console {
   display: flex;
   flex-direction: column;
@@ -2397,6 +2402,251 @@
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+.settings-health-band {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.65fr) minmax(260px, 1fr);
+  gap: 14px;
+}
+.settings-health-score,
+.settings-health-progress,
+.settings-diagnostic-card,
+.settings-test-message-card,
+.settings-instance-list,
+.settings-diagnostic-list,
+.settings-checklist-item {
+  border: 1px solid rgba(123, 97, 73, 0.16);
+  border-radius: 18px;
+  background: rgba(255,255,255,0.76);
+}
+.settings-health-score {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+}
+.settings-health-score span,
+.settings-health-progress span {
+  color: var(--admin-text-muted);
+  font-size: 10.5px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+.settings-health-score strong {
+  color: var(--admin-text);
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 900;
+}
+.settings-health-score small {
+  color: var(--admin-text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.settings-health-score.ok {
+  border-color: rgba(4,120,87,0.18);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(16,185,129,0.14), transparent 28%),
+    rgba(255,255,255,0.8);
+}
+.settings-health-score.warn {
+  border-color: rgba(245,158,11,0.2);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(245,158,11,0.16), transparent 28%),
+    rgba(255,255,255,0.8);
+}
+.settings-health-score.error {
+  border-color: rgba(220,38,38,0.18);
+  background:
+    radial-gradient(circle at 100% 0%, rgba(220,38,38,0.14), transparent 28%),
+    rgba(255,255,255,0.8);
+}
+.settings-health-progress {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+.settings-health-progress strong {
+  display: block;
+  margin-top: 7px;
+  color: var(--admin-text);
+  font-size: 15px;
+  font-weight: 900;
+}
+.settings-progress-bar {
+  width: 100%;
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(58,10,30,0.08);
+}
+.settings-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7a1435, #d4af37);
+}
+.settings-diagnostics-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.settings-diagnostic-card,
+.settings-test-message-card,
+.settings-instance-list,
+.settings-diagnostic-list {
+  padding: 16px;
+}
+.settings-diagnostic-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-diagnostic-card-top strong {
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+.settings-diagnostic-card-top span {
+  color: var(--admin-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+.settings-diagnostic-card p {
+  margin: 12px 0 0;
+  color: var(--admin-text-muted);
+  font-size: 12.5px;
+  line-height: 1.52;
+  word-break: break-word;
+}
+.settings-checklist-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+.settings-checklist-item {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+}
+.settings-checklist-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 12px;
+  background: rgba(58,10,30,0.08);
+}
+.settings-checklist-item strong {
+  display: block;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 900;
+}
+.settings-checklist-item p {
+  margin: 6px 0 0;
+  color: var(--admin-text-muted);
+  font-size: 12px;
+  line-height: 1.52;
+}
+.settings-checklist-item.ok {
+  border-color: rgba(4,120,87,0.18);
+}
+.settings-checklist-item.ok .settings-checklist-icon {
+  color: #047857;
+  background: rgba(16,185,129,0.12);
+}
+.settings-checklist-item.warn {
+  border-color: rgba(245,158,11,0.2);
+}
+.settings-checklist-item.warn .settings-checklist-icon {
+  color: #b45309;
+  background: rgba(245,158,11,0.12);
+}
+.settings-checklist-item.error {
+  border-color: rgba(220,38,38,0.18);
+}
+.settings-checklist-item.error .settings-checklist-icon {
+  color: #b91c1c;
+  background: rgba(220,38,38,0.12);
+}
+.settings-checklist-item.pending .settings-checklist-icon {
+  color: var(--admin-accent);
+}
+.settings-diagnostic-list {
+  display: grid;
+  gap: 10px;
+}
+.settings-diagnostic-list strong {
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 900;
+}
+.settings-diagnostic-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-diagnostic-list span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.settings-diagnostic-list.issue {
+  border-color: rgba(220,38,38,0.18);
+}
+.settings-diagnostic-list.issue span {
+  background: rgba(220,38,38,0.08);
+  color: #b91c1c;
+}
+.settings-diagnostic-list.warning {
+  border-color: rgba(245,158,11,0.2);
+}
+.settings-diagnostic-list.warning span {
+  background: rgba(245,158,11,0.12);
+  color: #b45309;
+}
+.settings-diagnostic-list.hint {
+  border-color: rgba(212,175,55,0.2);
+}
+.settings-diagnostic-list.hint span {
+  background: rgba(212,175,55,0.12);
+  color: var(--admin-accent);
+}
+.settings-instance-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.settings-instance-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 11px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 97, 73, 0.18);
+  background: rgba(255,255,255,0.9);
+  color: var(--admin-text-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+.settings-instance-pill.active {
+  border-color: rgba(4,120,87,0.18);
+  color: #047857;
+  background: rgba(16,185,129,0.09);
+}
+.settings-test-message-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 12px;
 }
 .settings-test-result {
   display: grid;
@@ -3500,9 +3750,18 @@
   }
   .settings-hero-card,
   .settings-integration-footer,
-  .settings-integration-console-header {
+  .settings-integration-console-header,
+  .settings-diagnostic-card-top {
     flex-direction: column;
     align-items: stretch;
+  }
+  .settings-inline-actions {
+    width: 100%;
+  }
+  .settings-inline-actions > button,
+  .settings-integration-actions > button {
+    width: 100%;
+    justify-content: center;
   }
   .settings-integration-card-top {
     grid-template-columns: 1fr;
@@ -3511,6 +3770,12 @@
     justify-self: flex-start;
   }
   .settings-integration-metrics {
+    grid-template-columns: 1fr;
+  }
+  .settings-health-band,
+  .settings-checklist-grid,
+  .settings-diagnostics-grid,
+  .settings-test-message-grid {
     grid-template-columns: 1fr;
   }
   .settings-qr-shell {

@@ -203,9 +203,38 @@ export type AdminEvolutionIntegrationSettings = {
   webhookSecretPreview: string | null;
 };
 
+export type AdminEvolutionChecklistStatus = 'ok' | 'warn' | 'error' | 'pending';
+
+export type AdminEvolutionChecklistItem = {
+  id: string;
+  label: string;
+  status: AdminEvolutionChecklistStatus;
+  detail: string;
+};
+
+export type AdminEvolutionIntegrationDiagnostics = {
+  checkedAt: string;
+  tenantSlug: string;
+  overallStatus: 'ready' | 'attention' | 'error' | 'missing';
+  readinessScore: number;
+  apiReachable: boolean;
+  secureUrl: boolean;
+  sendPathResolved: string;
+  sendUrlPreview: string | null;
+  webhookUrl: string | null;
+  instanceFound: boolean;
+  availableInstances: string[];
+  instancesCount: number;
+  checklist: AdminEvolutionChecklistItem[];
+  issues: string[];
+  warnings: string[];
+  recommendations: string[];
+};
+
 export type AdminEvolutionIntegrationState = {
   integration: AdminEvolutionIntegrationSettings;
   status: AdminEvolutionInstanceStatus;
+  diagnostics: AdminEvolutionIntegrationDiagnostics;
 };
 
 export type AdminEvolutionIntegrationSavePayload = {
@@ -224,4 +253,19 @@ export type AdminEvolutionIntegrationTestResult = {
   instanceFound: boolean;
   instancesCount: number;
   error: string | null;
+  diagnostics: AdminEvolutionIntegrationDiagnostics;
+};
+
+export type AdminEvolutionTestMessagePayload = {
+  phone: string;
+  text: string;
+  settings?: Partial<AdminEvolutionIntegrationSavePayload>;
+};
+
+export type AdminEvolutionTestMessageResult = {
+  ok: boolean;
+  normalizedPhone: string;
+  providerMessageId: string | null;
+  sentAt: string;
+  diagnostics: AdminEvolutionIntegrationDiagnostics;
 };

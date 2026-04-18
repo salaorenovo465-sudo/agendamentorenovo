@@ -4,7 +4,11 @@ import { workbenchStore, type WorkbenchEntity } from '../db/workbenchStore';
 import { bookingStore } from '../db/bookingStore';
 import { deleteCalendarEventById } from '../services/calendarService';
 import { runClientAgentRuleForTenant } from '../services/clientAgentService';
-import { testTenantEvolutionIntegration } from '../services/evolutionIntegrationService';
+import {
+  inspectEvolutionIntegration,
+  sendEvolutionTestMessage,
+  testTenantEvolutionIntegration,
+} from '../services/evolutionIntegrationService';
 import { getEvolutionInstanceStatus } from '../services/evolutionInstanceService';
 import type { BookingRecord } from '../types';
 import { getTodayDate, parseId } from '../utils/helpers';
@@ -345,6 +349,15 @@ const parseTenantFromQuery = (value: unknown): string | null => {
   return normalized;
 };
 
+const resolveRequestPublicBaseUrl = (req: { protocol?: string; get?: (name: string) => string | undefined }): string | undefined => {
+  const host = req.get ? req.get('host') : undefined;
+  if (!req.protocol || !host) {
+    return undefined;
+  }
+
+  return `${req.protocol}://${host}`;
+};
+
 const getPayloadString = (payload: Record<string, unknown>, key: string): string =>
   typeof payload[key] === 'string' ? payload[key].trim() : '';
 
@@ -543,9 +556,15 @@ adminWorkbenchRoutes.get('/settings/integrations/evolution', async (req, res) =>
   try {
     const settings = await workbenchStore.getSettings(tenant || undefined);
     const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    const diagnostics = await inspectEvolutionIntegration(
+      tenant || undefined,
+      undefined,
+      { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
+    );
     return res.json({
       integration: pickEvolutionIntegrationSettings(settings),
       status,
+      diagnostics,
     });
   } catch (error) {
     console.error('Erro ao carregar integracao Evolution:', error);
@@ -608,9 +627,15 @@ adminWorkbenchRoutes.put('/settings/integrations/evolution', async (req, res) =>
 
     const saved = await workbenchStore.saveSettings(merged, tenant || undefined);
     const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    const diagnostics = await inspectEvolutionIntegration(
+      tenant || undefined,
+      undefined,
+      { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
+    );
     return res.json({
       integration: pickEvolutionIntegrationSettings(saved),
       status,
+      diagnostics,
     });
   } catch (error) {
     console.error('Erro ao salvar integracao Evolution:', error);
@@ -641,7 +666,11 @@ adminWorkbenchRoutes.post('/settings/integrations/evolution/test', async (req, r
       evolutionWebhookSecret: getPayloadString(payload, 'evolutionWebhookSecret') || current.evolutionWebhookSecret,
     };
 
-    const result = await testTenantEvolutionIntegration(tenant || undefined, testSettings);
+    const result = await testTenantEvolutionIntegration(
+      tenant || undefined,
+      testSettings,
+      { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
+    );
     return res.json({ result });
   } catch (error) {
     console.error('Erro ao testar integracao Evolution:', error);
@@ -649,6 +678,62 @@ adminWorkbenchRoutes.post('/settings/integrations/evolution/test', async (req, r
       return res.status(503).json({ error: (error as Error).message });
     }
     return res.status(500).json({ error: 'Erro ao testar integracao Evolution.' });
+  }
+});
+
+adminWorkbenchRoutes.post('/settings/integrations/evolution/test-message', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  if (!payload) {
+    return res.status(400).json({ error: 'Payload invalido para o teste de envio.' });
+  }
+
+  const phone = getPayloadString(payload, 'phone');
+  const text = getPayloadString(payload, 'text');
+  const settingsPayload = payload.settings && typeof payload.settings === 'object'
+    ? (payload.settings as Record<string, unknown>)
+    : {};
+
+  if (!phone) {
+    return res.status(400).json({ error: 'Informe o telefone de teste.' });
+  }
+
+  if (!text) {
+    return res.status(400).json({ error: 'Informe a mensagem de teste.' });
+  }
+
+  try {
+    const current = await workbenchStore.getSettings(tenant || undefined);
+    const settingsOverride: Record<string, unknown> = {
+      ...current,
+      evolutionUrl: normalizeUrlSetting(getPayloadString(settingsPayload, 'evolutionUrl')) || current.evolutionUrl,
+      evolutionInstance: getPayloadString(settingsPayload, 'evolutionInstance') || current.evolutionInstance,
+      evolutionSendPath: getPayloadString(settingsPayload, 'evolutionSendPath') || current.evolutionSendPath || EVOLUTION_DEFAULT_SEND_PATH,
+      evolutionApiKey: getPayloadString(settingsPayload, 'evolutionApiKey') || current.evolutionApiKey,
+      evolutionWebhookSecret: getPayloadString(settingsPayload, 'evolutionWebhookSecret') || current.evolutionWebhookSecret,
+    };
+
+    const result = await sendEvolutionTestMessage(
+      tenant || undefined,
+      phone,
+      text,
+      settingsOverride,
+      { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
+    );
+
+    return res.json({ result });
+  } catch (error) {
+    console.error('Erro ao enviar mensagem de teste pela Evolution:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Erro ao enviar mensagem de teste.' });
   }
 });
 

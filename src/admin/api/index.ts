@@ -77,6 +77,7 @@ export {
   getEvolutionIntegrationForAdmin,
   saveEvolutionIntegrationForAdmin,
   testEvolutionIntegrationForAdmin,
+  sendEvolutionTestMessageForAdmin,
   getEvolutionInstanceStatusForAdmin,
   createEvolutionInstanceForAdmin,
   getEvolutionInstanceQrForAdmin,
@@ -99,4 +100,5 @@ export type {
   AdminEvolutionIntegrationState,
   AdminEvolutionIntegrationSavePayload,
   AdminEvolutionIntegrationTestResult,
+  AdminEvolutionTestMessageResult,
 } from '../types';
