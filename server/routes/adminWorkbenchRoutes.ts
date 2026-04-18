@@ -133,7 +133,20 @@ const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
       : 'manual';
     const messageTemplate = typeof row.messageTemplate === 'string' && row.messageTemplate.trim()
       ? row.messageTemplate.trim()
-      : 'Ola {cliente}, recomendamos seu retorno para {servico} em {data_proxima}.';
+      : [
+        '\u2728 *LEMBRETE DE RETORNO* \u2728',
+        '',
+        'Ola, *{cliente}*! \u{1F496}',
+        'Estamos entrando em contato pelo *Estudio Renovo* para lembrar do seu retorno. \u{1F338}',
+        '',
+        '\u{1F451} *SERVICO:*',
+        '{servico}',
+        '',
+        '\u{1F4C5} *DATA SUGERIDA:* {data_proxima}',
+        '',
+        'Se quiser, responda esta mensagem para organizarmos seu proximo horario. \u{1F4AC}\u2728',
+        'Sera um prazer receber voce novamente! \u{1F495}',
+      ].join('\n');
     const enabled = row.enabled !== false;
 
     if (!Number.isFinite(clientId) || clientId <= 0 || !clientName || !serviceName || !Number.isFinite(intervalValue)) {

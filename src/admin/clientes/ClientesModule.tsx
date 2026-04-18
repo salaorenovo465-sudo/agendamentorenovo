@@ -280,7 +280,18 @@ const buildDefaultDraft = (clientName: string, serviceName = ''): AgentDraft => 
   intervalValue: 3,
   intervalUnit: 'months',
   channel: 'whatsapp',
-  messageTemplate: `Ola {cliente}, ja estamos no periodo ideal para revisao do servico {servico}. Sua proxima sugestao de retorno: {data_proxima}.`,
+  messageTemplate: `✨ *LEMBRETE DE RETORNO* ✨
+
+Ola, *{cliente}*! 💖
+Estamos entrando em contato pelo *Estudio Renovo* para lembrar do seu retorno. 🌸
+
+👑 *SERVICO:*
+{servico}
+
+📅 *DATA SUGERIDA:* {data_proxima}
+
+Se quiser, responda esta mensagem para organizarmos seu proximo horario. 💬✨
+Sera um prazer receber voce novamente! 💕`,
   nextRunDate: TODAY(),
   sendAt: buildDefaultSendAt(TODAY()),
 });
