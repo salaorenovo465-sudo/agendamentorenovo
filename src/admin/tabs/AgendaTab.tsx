@@ -189,6 +189,7 @@ export function AgendaTab({
   const [submitting, setSubmitting] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
+  const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
   const [availability, setAvailability] = useState<AvailabilityState>({
     busySlots: [],
     loading: false,
@@ -439,9 +440,23 @@ export function AgendaTab({
     const serviceItems = extractBookingServiceItems(booking);
     const leadService = serviceItems[0]?.name || booking.service;
     const additionalServices = Math.max(0, serviceItems.length - 1);
+    const isExpanded = expandedBookingId === booking.id;
 
     return (
-      <div key={booking.id} className={`agenda-booking-card agenda-booking-card-${statusKey}`} aria-busy={busy}>
+      <div
+        key={booking.id}
+        className={`agenda-booking-card agenda-booking-card-${statusKey} ${isExpanded ? 'is-expanded' : ''}`}
+        aria-busy={busy}
+        tabIndex={0}
+        onMouseEnter={() => setExpandedBookingId(booking.id)}
+        onMouseLeave={() => setExpandedBookingId((current) => (current === booking.id ? null : current))}
+        onFocus={() => setExpandedBookingId(booking.id)}
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setExpandedBookingId((current) => (current === booking.id ? null : current));
+          }
+        }}
+      >
         <div className="agenda-booking-static">
           <div className="agenda-card-topline">
             <span className={`agenda-status-pill agenda-status-${statusKey}`}>

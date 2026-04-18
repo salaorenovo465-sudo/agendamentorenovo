@@ -1225,11 +1225,13 @@
     border-color 0.18s ease;
 }
 
+.agenda-booking-card.is-expanded,
 .agenda-booking-card:hover,
 .agenda-booking-card:focus-within {
   z-index: 2;
 }
 
+.agenda-booking-card.is-expanded .agenda-booking-hover-panel,
 .agenda-booking-card:hover .agenda-booking-hover-panel,
 .agenda-booking-card:focus-within .agenda-booking-hover-panel {
   max-height: 540px;
