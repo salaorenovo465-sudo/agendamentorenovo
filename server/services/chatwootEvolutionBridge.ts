@@ -1,5 +1,6 @@
 import { normalizeWhatsappPhone, normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 import { type GenericObject, asObject, asArray, getString, getPositiveInt } from '../utils/helpers';
+import { fetchEvolutionInstances, resolveEvolutionInstance } from './evolutionApiService';
 
 export type TenantBridgeConfig = {
   tenantSlug: string;
@@ -105,7 +106,9 @@ export const resolveTenantBridgeConfig = (
 
   const evolutionUrl = toBaseUrl(
     getString(settings.evolutionUrl) ||
+      getString(process.env[`${envPrefix}_EVOLUTION_API_URL`]) ||
       getString(process.env[`${envPrefix}_EVOLUTION_URL`]) ||
+      getString(process.env.EVOLUTION_API_URL) ||
       getString(process.env.EVOLUTION_URL),
   );
   const evolutionApiKey =
@@ -396,13 +399,19 @@ const pushIncomingMessageToChatwoot = async (
   );
 };
 
-const buildEvolutionSendUrl = (config: TenantBridgeConfig): string => {
-  const dynamicPath = config.evolutionSendPath.replace('{instance}', encodeURIComponent(config.evolutionInstance));
+const buildEvolutionSendUrl = (config: TenantBridgeConfig, instanceName: string): string => {
+  const dynamicPath = config.evolutionSendPath.replace('{instance}', encodeURIComponent(instanceName));
   return `${config.evolutionUrl}${withLeadingSlash(dynamicPath)}`;
 };
 
 const sendOutgoingMessageToEvolution = async (config: TenantBridgeConfig, phone: string, text: string): Promise<void> => {
-  const url = buildEvolutionSendUrl(config);
+  const instanceRows = await fetchEvolutionInstances(config.evolutionUrl, config.evolutionApiKey);
+  const resolvedInstance = resolveEvolutionInstance(instanceRows, config.evolutionInstance);
+  if (!resolvedInstance.row) {
+    throw new Error('A instancia configurada nao foi localizada na Evolution.');
+  }
+
+  const url = buildEvolutionSendUrl(config, resolvedInstance.instanceName);
 
   const response = await fetch(url, {
     method: 'POST',

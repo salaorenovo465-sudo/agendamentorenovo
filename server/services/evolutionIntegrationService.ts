@@ -2,16 +2,16 @@ import { workbenchStore } from '../db/workbenchStore';
 import { normalizeWhatsappPhone } from '../utils/phone';
 import { resolveTenantBridgeConfig } from './chatwootEvolutionBridge';
 import {
+  extractEvolutionInstanceCounts,
+  extractEvolutionInstanceName,
+  fetchEvolutionInstances,
+  resolveEvolutionInstance,
+  toEvolutionBaseUrl,
+} from './evolutionApiService';
+import {
   getEvolutionInstanceStatus,
   type EvolutionInstanceStatus,
 } from './evolutionInstanceService';
-
-type EvolutionApiFetchResult = {
-  ok: boolean;
-  rawBody: string;
-  payload: unknown;
-  status: number;
-};
 
 type EvolutionChecklistStatus = 'ok' | 'warn' | 'error' | 'pending';
 
@@ -73,21 +73,6 @@ const normalizeTenantSlug = (tenantSlug?: string): string => {
   return normalized || DEFAULT_TENANT_SLUG;
 };
 
-const toBaseUrl = (value: string): string => {
-  const raw = value.trim();
-  if (!raw) {
-    return '';
-  }
-
-  try {
-    const parsed = new URL(raw);
-    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
-    return `${parsed.origin}${pathname}`;
-  } catch {
-    return '';
-  }
-};
-
 const withLeadingSlash = (value: string): string => {
   const trimmed = value.trim();
   if (!trimmed) {
@@ -140,7 +125,7 @@ const normalizeSendPath = (value: string): string => {
 const buildEvolutionSendUrl = (evolutionUrl: string, instanceName: string, sendPath?: string): string => {
   const normalizedPath = normalizeSendPath(sendPath || DEFAULT_EVOLUTION_SEND_PATH);
   const dynamicPath = normalizedPath.replace('{instance}', encodeURIComponent(instanceName));
-  return `${toBaseUrl(evolutionUrl)}${withLeadingSlash(dynamicPath)}`;
+  return `${toEvolutionBaseUrl(evolutionUrl)}${withLeadingSlash(dynamicPath)}`;
 };
 
 const withTimeout = async <T>(work: (signal: AbortSignal) => Promise<T>, timeoutMs = EVOLUTION_REQUEST_TIMEOUT_MS): Promise<T> => {
@@ -153,41 +138,6 @@ const withTimeout = async <T>(work: (signal: AbortSignal) => Promise<T>, timeout
     clearTimeout(handle);
   }
 };
-
-const evolutionApiFetch = async (
-  evolutionUrl: string,
-  evolutionApiKey: string,
-  method: 'GET' | 'POST',
-  path: string,
-  body?: unknown,
-): Promise<EvolutionApiFetchResult> =>
-  withTimeout(async (signal) => {
-    const response = await fetch(`${toBaseUrl(evolutionUrl)}${withLeadingSlash(path)}`, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        apikey: evolutionApiKey,
-        Authorization: `Bearer ${evolutionApiKey}`,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal,
-    });
-
-    const rawBody = await response.text();
-    let payload: unknown = rawBody;
-    try {
-      payload = rawBody ? (JSON.parse(rawBody) as unknown) : {};
-    } catch {
-      payload = rawBody;
-    }
-
-    return {
-      ok: response.ok,
-      rawBody,
-      payload,
-      status: response.status,
-    };
-  });
 
 const extractProviderMessageId = (payload: unknown): string | null => {
   if (!payload || typeof payload !== 'object') {
@@ -211,21 +161,6 @@ const extractProviderMessageId = (payload: unknown): string | null => {
   }
 
   return null;
-};
-
-const extractInstanceNames = (payload: unknown): string[] => {
-  const rows = Array.isArray(payload)
-    ? payload
-    : payload && typeof payload === 'object'
-      ? ((payload as Record<string, unknown>).data as unknown[] | undefined)
-        || ((payload as Record<string, unknown>).instances as unknown[] | undefined)
-        || []
-      : [];
-
-  return rows
-    .map((row) => (row && typeof row === 'object' ? String((row as Record<string, unknown>).name || '').trim() : ''))
-    .filter(Boolean)
-    .slice(0, 25);
 };
 
 const buildWebhookUrl = (publicBaseUrl: string | undefined, tenantSlug: string): string | null => {
@@ -300,6 +235,7 @@ const buildChecklist = (params: {
   apiReachable: boolean;
   instanceFound: boolean;
   connected: boolean;
+  hasIndexedHistory: boolean | null;
   hasWebhookSecret: boolean;
   sendPathResolved: string;
   sendUrlPreview: string | null;
@@ -311,6 +247,7 @@ const buildChecklist = (params: {
     apiReachable,
     instanceFound,
     connected,
+    hasIndexedHistory,
     hasWebhookSecret,
     sendPathResolved,
     sendUrlPreview,
@@ -360,6 +297,16 @@ const buildChecklist = (params: {
         : instanceFound
           ? 'A instancia existe, mas ainda nao esta conectada.'
           : 'Conecte a instancia depois de confirmar as credenciais.',
+    },
+    {
+      id: 'history',
+      label: 'Historico indexado',
+      status: hasIndexedHistory === null ? 'pending' : hasIndexedHistory ? 'ok' : 'warn',
+      detail: hasIndexedHistory === null
+        ? 'A validacao do historico depende da leitura da instancia.'
+        : hasIndexedHistory
+          ? 'A Evolution ja possui historico salvo para contatos, chats ou mensagens.'
+          : 'A instancia esta conectada, mas a Evolution ainda nao indexou historico util para sincronizacao.',
     },
     {
       id: 'send_path',
@@ -432,6 +379,7 @@ const buildDiagnostics = async (
       apiReachable: false,
       instanceFound: false,
       connected: false,
+      hasIndexedHistory: null,
       hasWebhookSecret: Boolean(effectiveSettings.evolutionWebhookSecret),
       sendPathResolved: defaultDiagnostics.sendPathResolved,
       sendUrlPreview: null,
@@ -453,33 +401,32 @@ const buildDiagnostics = async (
   const secureUrl = isSecureHttpUrl(evolutionUrl);
   const allowHttpLocal = isLocalHttpUrl(evolutionUrl);
   const sendPathResolved = normalizeSendPath(resolvedConfig.evolutionSendPath);
-  const sendUrlPreview = buildEvolutionSendUrl(
-    resolvedConfig.evolutionUrl,
-    resolvedConfig.evolutionInstance,
-    resolvedConfig.evolutionSendPath,
-  );
-
   const issues: string[] = [];
   const warnings: string[] = [];
   let apiReachable = false;
   let availableInstances: string[] = [];
+  let resolvedCounts = { messages: 0, contacts: 0, chats: 0 };
+  let instanceResolution: ReturnType<typeof resolveEvolutionInstance>['resolution'] = 'missing';
 
-  let status: EvolutionInstanceStatus = await getEvolutionInstanceStatus(targetTenant, { includeQr: false });
+  const status: EvolutionInstanceStatus = await getEvolutionInstanceStatus(targetTenant, { includeQr: false });
+  const sendTargetInstance = status.exists ? status.instanceName : resolvedConfig.evolutionInstance;
+  const sendUrlPreview = buildEvolutionSendUrl(
+    resolvedConfig.evolutionUrl,
+    sendTargetInstance,
+    resolvedConfig.evolutionSendPath,
+  );
 
   try {
-    const fetchInstances = await evolutionApiFetch(
-      resolvedConfig.evolutionUrl,
-      resolvedConfig.evolutionApiKey,
-      'GET',
-      '/instance/fetchInstances',
-    );
+    const instanceRows = await fetchEvolutionInstances(resolvedConfig.evolutionUrl, resolvedConfig.evolutionApiKey);
+    apiReachable = true;
+    availableInstances = instanceRows
+      .map((row) => extractEvolutionInstanceName(row))
+      .filter(Boolean)
+      .slice(0, 25);
 
-    if (fetchInstances.ok) {
-      apiReachable = true;
-      availableInstances = extractInstanceNames(fetchInstances.payload);
-    } else {
-      issues.push(`Falha ao consultar instancias (${fetchInstances.status}).`);
-    }
+    const resolvedInstance = resolveEvolutionInstance(instanceRows, resolvedConfig.evolutionInstance);
+    instanceResolution = resolvedInstance.resolution;
+    resolvedCounts = extractEvolutionInstanceCounts(resolvedInstance.row);
   } catch (error) {
     issues.push(error instanceof Error ? error.message : 'Falha de rede ao consultar a Evolution.');
   }
@@ -494,9 +441,31 @@ const buildDiagnostics = async (
     warnings.push('A instancia existe, mas ainda nao esta conectada.');
   }
 
-  if (!availableInstances.includes(status.instanceName) && apiReachable) {
+  if (
+    status.exists &&
+    apiReachable &&
+    status.instanceName !== resolvedConfig.evolutionInstance &&
+    (instanceResolution === 'open-fallback' || instanceResolution === 'single-fallback')
+  ) {
+    warnings.push(`A instancia salva nao existe mais. A Evolution ativa foi resolvida como ${status.instanceName}.`);
+  }
+
+  if (
+    status.exists &&
+    resolvedCounts.messages === 0 &&
+    resolvedCounts.contacts === 0 &&
+    resolvedCounts.chats === 0
+  ) {
+    warnings.push('A instancia ativa ainda nao possui mensagens, contatos ou chats salvos na Evolution.');
+  }
+
+  if (!availableInstances.some((instanceName) => instanceName.trim().toLowerCase() === status.instanceName.trim().toLowerCase()) && apiReachable) {
     warnings.push('A lista de instancias nao retornou o nome configurado.');
   }
+
+  const hasIndexedHistory = status.exists && apiReachable
+    ? resolvedCounts.messages > 0 || resolvedCounts.contacts > 0 || resolvedCounts.chats > 0
+    : null;
 
   const checklist = buildChecklist({
     configured: true,
@@ -505,6 +474,7 @@ const buildDiagnostics = async (
     apiReachable,
     instanceFound: status.exists,
     connected: status.connected,
+    hasIndexedHistory,
     hasWebhookSecret: typeof effectiveSettings.evolutionWebhookSecret === 'string' && effectiveSettings.evolutionWebhookSecret.trim().length > 0,
     sendPathResolved,
     sendUrlPreview,
@@ -519,6 +489,9 @@ const buildDiagnostics = async (
   }
   if (!status.exists && configured) {
     recommendations.push('Crie a instancia diretamente pelo painel antes de liberar o agente.');
+  }
+  if (status.exists && resolvedCounts.messages === 0 && resolvedCounts.contacts === 0 && resolvedCounts.chats === 0) {
+    recommendations.push('Repare a instancia e confirme se a Evolution esta gravando historico antes de sincronizar contatos.');
   }
   if (!secureUrl && !allowHttpLocal) {
     recommendations.push('Prefira HTTPS publico para evitar bloqueios e inconsistencias em producao.');
@@ -586,10 +559,26 @@ const resolveEffectiveEvolutionConfig = async (
     throw new Error(resolved.error);
   }
 
+  const instanceRows = await fetchEvolutionInstances(resolved.config.evolutionUrl, resolved.config.evolutionApiKey);
+  const resolvedInstance = resolveEvolutionInstance(instanceRows, resolved.config.evolutionInstance);
+  if (!resolvedInstance.row) {
+    const availableInstances = instanceRows
+      .map((row) => extractEvolutionInstanceName(row))
+      .filter(Boolean)
+      .slice(0, 5);
+    const suffix = availableInstances.length > 0
+      ? ` Instancias visiveis: ${availableInstances.join(', ')}.`
+      : '';
+    throw new Error(`A instancia configurada nao foi localizada na Evolution.${suffix}`);
+  }
+
   return {
     tenantSlug: targetTenant,
     settings: merged,
-    config: resolved.config,
+    config: {
+      ...resolved.config,
+      evolutionInstance: resolvedInstance.instanceName || resolved.config.evolutionInstance,
+    },
   };
 };
 

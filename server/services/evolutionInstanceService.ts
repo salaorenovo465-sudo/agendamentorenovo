@@ -1,6 +1,13 @@
 import { workbenchStore } from '../db/workbenchStore';
 import { resolveTenantBridgeConfig } from './chatwootEvolutionBridge';
-import { type GenericObject, asObject, asArray, getString } from '../utils/helpers';
+import { asObject, getString } from '../utils/helpers';
+import {
+  evolutionApiRequest,
+  extractEvolutionInstanceName,
+  fetchEvolutionInstances,
+  parseEvolutionConnectionState,
+  resolveEvolutionInstance,
+} from './evolutionApiService';
 
 export type EvolutionInstanceConnectionState =
   | 'missing'
@@ -33,7 +40,6 @@ type ResolvedEvolutionConfig = {
 
 const DEFAULT_TENANT_SLUG = (process.env.DEFAULT_TENANT_SLUG || 'renovo').trim().toLowerCase();
 
-
 const normalizeTenantSlug = (value: string | undefined): string => {
   const normalized = (value || '').trim().toLowerCase();
   return normalized || DEFAULT_TENANT_SLUG;
@@ -52,19 +58,6 @@ const buildInstanceName = (companyName: string, tenantSlug: string): string => {
   const tenantPart = slugify(tenantSlug || DEFAULT_TENANT_SLUG) || DEFAULT_TENANT_SLUG;
   const base = `${companySlug || 'empresa'}-${tenantPart}`;
   return base.slice(0, 64);
-};
-
-const toBaseUrl = (value: string): string => {
-  const raw = value.trim();
-  if (!raw) return '';
-
-  try {
-    const parsed = new URL(raw);
-    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
-    return `${parsed.origin}${pathname}`;
-  } catch {
-    return '';
-  }
 };
 
 const inferCompanyName = async (tenantSlug: string, settings: Record<string, unknown>): Promise<string> => {
@@ -139,45 +132,11 @@ const resolveEvolutionConfig = async (
   };
 };
 
-const evolutionRequest = async (
-  config: ResolvedEvolutionConfig,
-  method: 'GET' | 'POST' | 'DELETE',
-  path: string,
-  body?: unknown,
-): Promise<unknown> => {
-  const response = await fetch(`${toBaseUrl(config.evolutionUrl)}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: config.evolutionApiKey,
-      Authorization: `Bearer ${config.evolutionApiKey}`,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-
-  const raw = await response.text();
-  let payload: unknown = {};
-  try {
-    payload = raw ? (JSON.parse(raw) as unknown) : {};
-  } catch {
-    payload = raw;
+const toConnectionState = (value: unknown): EvolutionInstanceConnectionState => {
+  const normalized = parseEvolutionConnectionState(value);
+  if (normalized === 'open' || normalized === 'connecting' || normalized === 'close' || normalized === 'disconnected' || normalized === 'missing') {
+    return normalized;
   }
-
-  if (!response.ok) {
-    const message = typeof payload === 'string' ? payload : JSON.stringify(payload);
-    throw new Error(`Evolution ${method} ${path} -> ${response.status}: ${message || 'erro desconhecido'}`);
-  }
-
-  return payload;
-};
-
-const parseConnectionState = (value: unknown): EvolutionInstanceConnectionState => {
-  const normalized = getString(value).toLowerCase();
-  if (normalized === 'open') return 'open';
-  if (normalized === 'connecting' || normalized === 'starting') return 'connecting';
-  if (normalized === 'close' || normalized === 'closed') return 'close';
-  if (normalized === 'disconnected') return 'disconnected';
-  if (normalized === 'missing') return 'missing';
   return 'unknown';
 };
 
@@ -198,25 +157,19 @@ const extractQrDataUrl = (payload: unknown): string | null => {
   return nested || null;
 };
 
-const listEvolutionInstances = async (config: ResolvedEvolutionConfig): Promise<GenericObject[]> => {
-  const payload = await evolutionRequest(config, 'GET', '/instance/fetchInstances');
-  return asArray(payload)
-    .map((row) => asObject(row))
-    .filter((row): row is GenericObject => Boolean(row));
-};
-
-const findInstanceRow = (rows: GenericObject[], instanceName: string): GenericObject | null => {
-  const target = instanceName.trim().toLowerCase();
-  if (!target) return null;
-
-  return rows.find((row) => getString(row.name).toLowerCase() === target) || null;
-};
-
-const readInstanceState = async (config: ResolvedEvolutionConfig): Promise<EvolutionInstanceConnectionState> => {
+const readInstanceState = async (
+  config: ResolvedEvolutionConfig,
+  instanceName: string,
+): Promise<EvolutionInstanceConnectionState> => {
   try {
-    const payload = await evolutionRequest(config, 'GET', `/instance/connectionState/${encodeURIComponent(config.instanceName)}`);
+    const payload = await evolutionApiRequest(
+      config.evolutionUrl,
+      config.evolutionApiKey,
+      'GET',
+      `/instance/connectionState/${encodeURIComponent(instanceName)}`,
+    );
     const instance = asObject(asObject(payload)?.instance);
-    return parseConnectionState(instance?.state);
+    return toConnectionState(instance?.state);
   } catch {
     return 'unknown';
   }
@@ -271,35 +224,51 @@ export const getEvolutionInstanceStatus = async (
   }
 
   try {
-    const instances = await listEvolutionInstances(resolved);
-    const found = findInstanceRow(instances, resolved.instanceName);
-    if (!found) {
+    const instances = await fetchEvolutionInstances(resolved.evolutionUrl, resolved.evolutionApiKey);
+    const match = resolveEvolutionInstance(instances, resolved.instanceName);
+    if (!match.row) {
       return toStatusPayload(resolved, { exists: false, connectionState: 'missing' });
     }
 
-    const rowState = parseConnectionState(found.connectionStatus || found.state || found.status);
-    const connectionState = rowState === 'unknown' ? await readInstanceState(resolved) : rowState;
+    const resolvedInstanceName = extractEvolutionInstanceName(match.row) || match.instanceName || resolved.instanceName;
+    if (resolvedInstanceName && resolvedInstanceName !== resolved.instanceName) {
+      await saveInstanceNameToSettings(resolved.tenantSlug, resolved.settings, resolvedInstanceName);
+    }
+
+    const rowState = toConnectionState(match.row.connectionStatus || match.row.state || match.row.status);
+    const connectionState = rowState === 'unknown' ? await readInstanceState(resolved, resolvedInstanceName) : rowState;
 
     let qrDataUrl: string | null = null;
     if (options.includeQr && connectionState !== 'open') {
       try {
-        const connectPayload = await evolutionRequest(resolved, 'GET', `/instance/connect/${encodeURIComponent(resolved.instanceName)}`);
+        const connectPayload = await evolutionApiRequest(
+          resolved.evolutionUrl,
+          resolved.evolutionApiKey,
+          'GET',
+          `/instance/connect/${encodeURIComponent(resolvedInstanceName)}`,
+        );
         qrDataUrl = extractQrDataUrl(connectPayload);
       } catch (error) {
-        return toStatusPayload(resolved, {
-          exists: true,
-          connectionState,
-          qrDataUrl: null,
-          lastError: error instanceof Error ? error.message : 'Falha ao obter QR da Evolution.',
-        });
+        return toStatusPayload(
+          { ...resolved, instanceName: resolvedInstanceName },
+          {
+            exists: true,
+            connectionState,
+            qrDataUrl: null,
+            lastError: error instanceof Error ? error.message : 'Falha ao obter QR da Evolution.',
+          },
+        );
       }
     }
 
-    return toStatusPayload(resolved, {
-      exists: true,
-      connectionState,
-      qrDataUrl,
-    });
+    return toStatusPayload(
+      { ...resolved, instanceName: resolvedInstanceName },
+      {
+        exists: true,
+        connectionState,
+        qrDataUrl,
+      },
+    );
   } catch (error) {
     return toStatusPayload(resolved, {
       exists: false,
@@ -313,13 +282,16 @@ export const createEvolutionInstance = async (
   tenantSlugRaw?: string,
   preferredCompanyName?: string,
 ): Promise<EvolutionInstanceStatus> => {
-  const resolved = await resolveEvolutionConfig(tenantSlugRaw, preferredCompanyName ? buildInstanceName(preferredCompanyName, normalizeTenantSlug(tenantSlugRaw)) : undefined);
+  const resolved = await resolveEvolutionConfig(
+    tenantSlugRaw,
+    preferredCompanyName ? buildInstanceName(preferredCompanyName, normalizeTenantSlug(tenantSlugRaw)) : undefined,
+  );
   if (!resolved) {
     return missingConfigStatus(tenantSlugRaw);
   }
 
   try {
-    await evolutionRequest(resolved, 'POST', '/instance/create', {
+    await evolutionApiRequest(resolved.evolutionUrl, resolved.evolutionApiKey, 'POST', '/instance/create', {
       instanceName: resolved.instanceName,
       qrcode: true,
       integration: 'WHATSAPP-BAILEYS',
@@ -345,13 +317,18 @@ export const logoutEvolutionInstance = async (tenantSlugRaw?: string): Promise<E
   }
 
   try {
-    // Logout disconnects WhatsApp session on the Evolution API
-    await evolutionRequest(resolved, 'DELETE', `/instance/logout/${encodeURIComponent(resolved.instanceName)}`);
+    const currentStatus = await getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: false });
+    const targetInstance = currentStatus.exists ? currentStatus.instanceName : resolved.instanceName;
+    await evolutionApiRequest(
+      resolved.evolutionUrl,
+      resolved.evolutionApiKey,
+      'DELETE',
+      `/instance/logout/${encodeURIComponent(targetInstance)}`,
+    );
   } catch (err) {
-    console.warn('Logout da instância Evolution falhou:', err);
+    console.warn('Logout da instÃ¢ncia Evolution falhou:', err);
   }
 
-  // Return status with QR so admin can reconnect with a different number
   return getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: true });
 };
 
@@ -362,9 +339,17 @@ export const refreshEvolutionInstanceQr = async (tenantSlugRaw?: string): Promis
   }
 
   try {
-    await evolutionRequest(resolved, 'POST', `/instance/restart/${encodeURIComponent(resolved.instanceName)}`, {});
+    const currentStatus = await getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: false });
+    const targetInstance = currentStatus.exists ? currentStatus.instanceName : resolved.instanceName;
+    await evolutionApiRequest(
+      resolved.evolutionUrl,
+      resolved.evolutionApiKey,
+      'POST',
+      `/instance/restart/${encodeURIComponent(targetInstance)}`,
+      {},
+    );
   } catch (err) {
-    console.warn('Restart da instância Evolution não necessário ou falhou:', err);
+    console.warn('Restart da instÃ¢ncia Evolution nÃ£o necessÃ¡rio ou falhou:', err);
   }
 
   return getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: true });

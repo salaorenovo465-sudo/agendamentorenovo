@@ -2,6 +2,11 @@ import { inboxStore } from '../db/inboxStore';
 import { whatsappWorkspaceStore } from '../db/whatsappWorkspaceStore';
 import { workbenchStore } from '../db/workbenchStore';
 import { resolveTenantBridgeConfig } from './chatwootEvolutionBridge';
+import {
+  extractEvolutionInstanceCounts,
+  fetchEvolutionInstances,
+  resolveEvolutionInstance,
+} from './evolutionApiService';
 import { normalizeWhatsappPhone } from '../utils/phone';
 import { type GenericObject, asObject, asArray, getString } from '../utils/helpers';
 
@@ -253,7 +258,24 @@ export const syncEvolutionWorkspace = async (tenantSlug?: string): Promise<Evolu
   }
 
   const config = resolved.config;
-  const instance = encodeURIComponent(config.evolutionInstance);
+  const instanceRows = await fetchEvolutionInstances(config.evolutionUrl, config.evolutionApiKey);
+  const resolvedInstance = resolveEvolutionInstance(instanceRows, config.evolutionInstance);
+  if (!resolvedInstance.row) {
+    const availableInstances = resolvedInstance.availableInstances.slice(0, 5);
+    return {
+      ok: false,
+      tenantSlug: targetTenant,
+      contactsSynced: 0,
+      chatsSynced: 0,
+      issues: [
+        availableInstances.length > 0
+          ? `A instancia configurada nao foi localizada na Evolution. Instancias visiveis: ${availableInstances.join(', ')}.`
+          : 'A instancia configurada nao foi localizada na Evolution.',
+      ],
+    };
+  }
+
+  const instance = encodeURIComponent(resolvedInstance.instanceName);
   const maxRowsRaw = Number(process.env.EVOLUTION_SYNC_MAX_ROWS || 400);
   const maxRows = Number.isFinite(maxRowsRaw) ? Math.max(50, Math.min(5000, Math.floor(maxRowsRaw))) : 400;
 
@@ -352,10 +374,24 @@ export const syncEvolutionWorkspace = async (tenantSlug?: string): Promise<Evolu
     chatsSynced += 1;
   }
 
+  const instanceCounts = extractEvolutionInstanceCounts(resolvedInstance.row);
+  if (
+    contactsRows.length === 0 &&
+    chatsRows.length === 0 &&
+    instanceCounts.messages === 0 &&
+    instanceCounts.contacts === 0 &&
+    instanceCounts.chats === 0
+  ) {
+    issues.push(
+      `A instancia ${resolvedInstance.instanceName} respondeu, mas ainda nao possui mensagens, contatos ou chats salvos na Evolution.`,
+    );
+  }
+
   const hasSuccessfulEndpoint = contactsOutcome.success || chatsOutcome.success;
+  const hasBlockingEmptyState = issues.some((issue) => issue.includes('ainda nao possui mensagens, contatos ou chats salvos'));
 
   return {
-    ok: hasSuccessfulEndpoint,
+    ok: hasSuccessfulEndpoint && !hasBlockingEmptyState,
     tenantSlug: targetTenant,
     contactsSynced,
     chatsSynced,

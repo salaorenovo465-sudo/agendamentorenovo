@@ -556,13 +556,16 @@ adminWorkbenchRoutes.get('/settings/integrations/evolution', async (req, res) =>
   try {
     const settings = await workbenchStore.getSettings(tenant || undefined);
     const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    const effectiveSettings = status.exists && status.instanceName
+      ? { ...settings, evolutionInstance: status.instanceName }
+      : settings;
     const diagnostics = await inspectEvolutionIntegration(
       tenant || undefined,
-      undefined,
+      effectiveSettings,
       { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
     );
     return res.json({
-      integration: pickEvolutionIntegrationSettings(settings),
+      integration: pickEvolutionIntegrationSettings(effectiveSettings),
       status,
       diagnostics,
     });
@@ -627,13 +630,16 @@ adminWorkbenchRoutes.put('/settings/integrations/evolution', async (req, res) =>
 
     const saved = await workbenchStore.saveSettings(merged, tenant || undefined);
     const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    const effectiveSettings = status.exists && status.instanceName
+      ? { ...saved, evolutionInstance: status.instanceName }
+      : saved;
     const diagnostics = await inspectEvolutionIntegration(
       tenant || undefined,
-      undefined,
+      effectiveSettings,
       { publicBaseUrl: resolveRequestPublicBaseUrl(req) },
     );
     return res.json({
-      integration: pickEvolutionIntegrationSettings(saved),
+      integration: pickEvolutionIntegrationSettings(effectiveSettings),
       status,
       diagnostics,
     });
