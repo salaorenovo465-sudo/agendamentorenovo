@@ -914,7 +914,11 @@
   padding-bottom: 4px;
 }
 .agenda-board-column {
+  display: flex;
+  flex-direction: column;
   min-width: 260px;
+  min-height: 0;
+  max-height: calc(100vh - 300px);
   border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.76), rgba(255,255,255,0.48)),
@@ -968,13 +972,18 @@
 .agenda-board-done header strong { color: #4f46e5; }
 .agenda-board-done header strong { background: rgba(99,102,241,0.12); }
 .agenda-column-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 12px;
-  max-height: calc(100vh - 430px);
+  padding-right: 8px;
+  max-height: none;
   min-height: 260px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
 }
 .agenda-empty-column {
   padding: 16px;

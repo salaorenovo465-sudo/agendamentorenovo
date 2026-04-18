@@ -449,9 +449,7 @@ export function AgendaTab({
         aria-busy={busy}
         tabIndex={0}
         onMouseEnter={() => setExpandedBookingId(booking.id)}
-        onMouseLeave={() => setExpandedBookingId((current) => (current === booking.id ? null : current))}
         onPointerEnter={() => setExpandedBookingId(booking.id)}
-        onPointerLeave={() => setExpandedBookingId((current) => (current === booking.id ? null : current))}
         onFocus={() => setExpandedBookingId(booking.id)}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -667,7 +665,17 @@ export function AgendaTab({
                   <strong>{column.items.length}</strong>
                 </div>
               </header>
-              <div className="agenda-column-scroll">
+              <div
+                className="agenda-column-scroll"
+                onMouseLeave={() => setExpandedBookingId((current) => {
+                  const visibleIds = new Set(column.items.map((item) => item.id));
+                  return current !== null && visibleIds.has(current) ? null : current;
+                })}
+                onPointerLeave={() => setExpandedBookingId((current) => {
+                  const visibleIds = new Set(column.items.map((item) => item.id));
+                  return current !== null && visibleIds.has(current) ? null : current;
+                })}
+              >
                 {column.items.length === 0 ? (
                   <div className="agenda-empty-column">Nenhum agendamento nesta etapa.</div>
                 ) : (
