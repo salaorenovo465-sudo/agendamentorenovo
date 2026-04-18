@@ -988,6 +988,9 @@
   scrollbar-width: thin;
   scrollbar-color: transparent transparent;
 }
+.agenda-column-scroll > * {
+  flex: 0 0 auto;
+}
 .agenda-column-scroll::-webkit-scrollbar {
   width: 7px;
 }
@@ -1034,7 +1037,9 @@
 }
 .agenda-booking-card {
   position: relative;
+  flex: 0 0 auto;
   padding: 10px;
+  min-height: 136px;
   border-radius: 16px;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
@@ -1069,7 +1074,7 @@
 .agenda-booking-static,
 .agenda-booking-hover-panel {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 .agenda-card-topline {
   justify-content: space-between;
@@ -1110,6 +1115,7 @@
 }
 .agenda-client-row {
   gap: 10px;
+  min-height: 42px;
 }
 .agenda-avatar {
   flex: 0 0 auto;
@@ -1201,6 +1207,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+  min-height: 24px;
 }
 
 .agenda-card-tags span {
@@ -1248,7 +1255,6 @@
 }
 
 .agenda-booking-card {
-  min-height: 0;
   scroll-margin-block: 14px;
 }
 
