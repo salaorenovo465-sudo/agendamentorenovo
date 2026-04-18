@@ -307,29 +307,6 @@ export function AgendaTab({
     return { top, left, width };
   };
 
-  const revealExpandedCard = (card: HTMLDivElement | null) => {
-    if (!card || typeof window === 'undefined') return;
-
-    const column = card.closest('.agenda-column-scroll');
-    if (!(column instanceof HTMLElement)) return;
-
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const cardRect = card.getBoundingClientRect();
-        const columnRect = column.getBoundingClientRect();
-        const safePadding = 18;
-
-        if (cardRect.bottom > columnRect.bottom - safePadding) {
-          column.scrollTop += cardRect.bottom - columnRect.bottom + safePadding;
-        }
-
-        if (cardRect.top < columnRect.top + safePadding) {
-          column.scrollTop -= columnRect.top - cardRect.top + safePadding;
-        }
-      });
-    });
-  };
-
   const handleExpandBooking = (bookingId: number, card: HTMLDivElement | null) => {
     cancelClosePanel();
     if (card) {
@@ -342,7 +319,6 @@ export function AgendaTab({
         width: Math.min(360, window.innerWidth - 32),
       }));
     }
-    revealExpandedCard(card);
   };
 
   const handleColumnScroll = (columnKey: string) => {
@@ -387,13 +363,11 @@ export function AgendaTab({
     setExpandedPanel((current) => (current?.bookingId === expandedBookingId
       ? { bookingId: expandedBookingId, ...getExpandedPanelLayout(card) }
       : current));
-    revealExpandedCard(card);
 
     const syncLayout = () => {
       setExpandedPanel((current) => (current?.bookingId === expandedBookingId
         ? { bookingId: expandedBookingId, ...getExpandedPanelLayout(card) }
         : current));
-      revealExpandedCard(card);
     };
 
     const followUp = window.setTimeout(syncLayout, 110);
