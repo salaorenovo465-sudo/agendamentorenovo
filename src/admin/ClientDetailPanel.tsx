@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Calendar, CheckCircle2, Clock, Loader2, Mail, MapPin, Phone, Save, Sparkles, User, X, XCircle } from 'lucide-react';
 
+import { DangerConfirmModal } from './AdminHelpers';
 import { listBookingsByPhoneForAdmin, updateWorkbenchEntityForAdmin, deleteWorkbenchEntityForAdmin } from './api';
 import type { AdminBooking } from './types';
 
@@ -43,6 +44,7 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
   const [draft, setDraft] = useState<Record<string, unknown>>({ ...client });
   const [saving, setSaving] = useState(false);
   const [activeSection, setActiveSection] = useState<'info' | 'historico' | 'analytics'>('info');
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   const phone = toStr(client.phone);
 
@@ -82,10 +84,10 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
     } catch { /* silent */ } finally { setSaving(false); }
   };
 
-  const handleDelete = async () => {
+  const handleDelete = async (masterPassword?: string) => {
     const id = toNum(client.id);
-    if (!id || !window.confirm('Deseja remover este cliente?')) return;
-    await deleteWorkbenchEntityForAdmin('clients', id, adminKey);
+    if (!id || !masterPassword) return;
+    await deleteWorkbenchEntityForAdmin('clients', id, adminKey, { masterPassword });
     onUpdated?.();
     onClose();
   };
@@ -179,7 +181,7 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
                   )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button onClick={() => { setDraft({ ...client }); setEditing(true); }} className="admin-btn-primary" style={{ padding: '9px 20px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}><User style={{ width: 13, height: 13 }} /> Editar informações</button>
-                    <button onClick={() => void handleDelete()} className="admin-btn-danger" style={{ padding: '9px 20px', fontSize: 12 }}>Excluir</button>
+                    <button onClick={() => setDeleteOpen(true)} className="admin-btn-danger" style={{ padding: '9px 20px', fontSize: 12 }}>Excluir</button>
                   </div>
                 </div>
               ) : (
@@ -312,6 +314,20 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
           )}
         </div>
       </div>
+      <DangerConfirmModal
+        isOpen={deleteOpen}
+        title="Excluir cliente"
+        subtitle="O cadastro sera removido desta central"
+        description={`Digite EXCLUIR CLIENTE para remover ${toStr(client.name) || 'este cliente'} da base administrativa.`}
+        confirmText="EXCLUIR CLIENTE"
+        confirmLabel="Excluir cliente"
+        helperText="A exclusao remove o cadastro do Supabase e encerra este registro na carteira."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para excluir o cliente"
+        busy={saving}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

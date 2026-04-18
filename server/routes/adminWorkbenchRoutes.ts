@@ -318,6 +318,13 @@ const ENTITIES: WorkbenchEntity[] = [
   'automations',
 ];
 
+const SENSITIVE_DELETE_ENTITIES = new Set<WorkbenchEntity>([
+  'availability',
+  'clients',
+  'professionals',
+  'services',
+]);
+
 const isValidEntity = (value: string): value is WorkbenchEntity => ENTITIES.includes(value as WorkbenchEntity);
 
 export const adminWorkbenchRoutes = Router();
@@ -692,7 +699,25 @@ adminWorkbenchRoutes.get('/clients/by-phone/:phone', async (req, res) => {
 
 adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
   const date = typeof req.body?.date === 'string' && DATE_REGEX.test(req.body.date) ? req.body.date : undefined;
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   try {
+    const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+    const masterPassword = getPayloadString(payload, 'masterPassword');
+
+    if (!masterPassword) {
+      return res.status(400).json({ error: 'Informe a senha master.' });
+    }
+
+    const settings = await workbenchStore.getSettings(tenant || undefined);
+    if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+      return res.status(403).json({ error: 'Senha master invalida.' });
+    }
+
     const deleted = await workbenchStore.resetFinance(date);
     let bookingsReset = 0;
     if (!date) {
@@ -712,8 +737,26 @@ adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
   }
 });
 
-adminWorkbenchRoutes.post('/history/reset', async (_req, res) => {
+adminWorkbenchRoutes.post('/history/reset', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   try {
+    const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+    const masterPassword = getPayloadString(payload, 'masterPassword');
+
+    if (!masterPassword) {
+      return res.status(400).json({ error: 'Informe a senha master.' });
+    }
+
+    const settings = await workbenchStore.getSettings(tenant || undefined);
+    if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+      return res.status(403).json({ error: 'Senha master invalida.' });
+    }
+
     if (!workbenchStore.isEnabled()) {
       return res.status(503).json({ error: 'Modulo workbench indisponivel para limpar o historico total.' });
     }
@@ -849,7 +892,26 @@ adminWorkbenchRoutes.delete('/:entity/:id', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido.' });
   }
 
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   try {
+    if (SENSITIVE_DELETE_ENTITIES.has(entity)) {
+      const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+      const masterPassword = getPayloadString(payload, 'masterPassword');
+
+      if (!masterPassword) {
+        return res.status(400).json({ error: 'Informe a senha master para concluir a exclusao.' });
+      }
+
+      const settings = await workbenchStore.getSettings(tenant || undefined);
+      if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+        return res.status(403).json({ error: 'Senha master invalida.' });
+      }
+    }
+
     await workbenchStore.remove(entity, id);
     return res.json({ message: 'Registro removido com sucesso.' });
   } catch (error) {

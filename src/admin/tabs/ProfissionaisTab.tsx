@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
 import { CalendarDays, Mail, MapPin, Percent, Plus, Save, Sparkles, Trash2, UserRound, X } from 'lucide-react';
 
+import { DangerConfirmModal } from '../AdminHelpers';
 import { toNumber, toStringValue } from '../AdminUtils';
 import {
   countCollaboratorCategories,
@@ -316,11 +317,12 @@ export function ProfissionaisTab({
   serviceCatalog: ServiceCatalogCategory[];
   onCreateEntity: (entity: 'professionals', payload: Record<string, unknown>) => Promise<void>;
   onUpdateEntity: (entity: 'professionals', id: number, payload: Record<string, unknown>) => Promise<void>;
-  onDeleteEntity: (entity: 'professionals', id: number) => Promise<void>;
+  onDeleteEntity: (entity: 'professionals', id: number, masterPassword?: string) => Promise<void>;
 }) {
   const [newDraft, setNewDraft] = useState<CollaboratorDraft>(() => createEmptyCollaboratorDraft(serviceCatalog));
   const [modalError, setModalError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
 
   useEffect(() => {
     if (!showNewProf) return;
@@ -400,16 +402,21 @@ export function ProfissionaisTab({
   const handleDeleteCollaborator = () => {
     const id = selectedProf ? toNumber(selectedProf.id) : 0;
     if (!id) return;
-    if (!window.confirm('Deseja remover este colaborador?')) return;
-    void (async () => {
-      setSaving(true);
-      try {
-        await onDeleteEntity('professionals', id);
-        setSelectedProf(null);
-      } finally {
-        setSaving(false);
-      }
-    })();
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDeleteCollaborator = async (masterPassword?: string) => {
+    const id = selectedProf ? toNumber(selectedProf.id) : 0;
+    if (!id || !masterPassword) return;
+
+    setSaving(true);
+    try {
+      await onDeleteEntity('professionals', id, masterPassword);
+      setDeleteConfirmOpen(false);
+      setSelectedProf(null);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -481,18 +488,34 @@ export function ProfissionaisTab({
       )}
 
       {selectedProf && (
-        <CollaboratorEditorModal
-          title={editingDraft.name || 'Editar colaborador'}
-          subtitle="Painel completo de especialidades, categorias e comissao por servico."
-          draft={editingDraft}
-          saveLabel="Salvar alteracoes"
-          saving={saving}
-          error={modalError}
-          onClose={() => setSelectedProf(null)}
-          onSave={handleSaveCollaborator}
-          onDelete={handleDeleteCollaborator}
-          onChange={(next) => persistEditingDraft(cloneDraft(next))}
-        />
+        <>
+          <CollaboratorEditorModal
+            title={editingDraft.name || 'Editar colaborador'}
+            subtitle="Painel completo de especialidades, categorias e comissao por servico."
+            draft={editingDraft}
+            saveLabel="Salvar alteracoes"
+            saving={saving}
+            error={modalError}
+            onClose={() => setSelectedProf(null)}
+            onSave={handleSaveCollaborator}
+            onDelete={handleDeleteCollaborator}
+            onChange={(next) => persistEditingDraft(cloneDraft(next))}
+          />
+          <DangerConfirmModal
+            isOpen={deleteConfirmOpen}
+            title="Excluir colaborador"
+            subtitle="O cadastro sera removido da central de operacao"
+            description={`Digite EXCLUIR COLABORADOR para apagar ${editingDraft.name || 'este colaborador'} da base administrativa.`}
+            confirmText="EXCLUIR COLABORADOR"
+            confirmLabel="Excluir colaborador"
+            helperText="A exclusao remove o colaborador do Supabase e encerra o cadastro operacional."
+            requireMasterPassword
+            passwordPlaceholder="Digite a senha master para excluir o colaborador"
+            busy={saving}
+            onClose={() => setDeleteConfirmOpen(false)}
+            onConfirm={confirmDeleteCollaborator}
+          />
+        </>
       )}
     </div>
   );

@@ -21,7 +21,7 @@ import { DangerConfirmModal } from './AdminHelpers';
 
 type Props = {
   adminKey: string;
-  onClearPaymentsHistory: () => Promise<void>;
+  onClearPaymentsHistory: (masterPassword?: string) => Promise<void>;
 };
 
 const PAYMENT_METHODS = [
@@ -187,12 +187,12 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
   const [endDate, setEndDate] = useState(getTodayDate());
   const [resetPaymentsModalOpen, setResetPaymentsModalOpen] = useState(false);
 
-  const handleClearPaymentsHistory = async () => {
+  const handleClearPaymentsHistory = async (masterPassword?: string) => {
     setBusyKey('reset-payments');
     setError('');
 
     try {
-      await onClearPaymentsHistory();
+      await onClearPaymentsHistory(masterPassword);
       await load();
       setResetPaymentsModalOpen(false);
     } catch (err) {
@@ -831,6 +831,8 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
         confirmText="LIMPAR PAGAMENTOS"
         confirmLabel="Apagar pagamentos"
         helperText="A limpeza remove os extratos financeiros do Supabase e redefine os pagamentos vinculados na agenda."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para limpar pagamentos"
         busy={busyKey === 'reset-payments'}
         onClose={() => setResetPaymentsModalOpen(false)}
         onConfirm={handleClearPaymentsHistory}

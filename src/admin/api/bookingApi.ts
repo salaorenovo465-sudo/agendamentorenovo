@@ -1,6 +1,6 @@
 import { apiUrl } from '../../apiBase';
 import type { AdminBooking, AdminCreateBookingPayload } from '../types';
-import { requestAdmin } from './apiCore';
+import { requestAdmin, withTenantQuery } from './apiCore';
 
 type BookingAvailability = {
   busySlots: string[];
@@ -27,20 +27,27 @@ export const listAdminBookings = async (
   return response.bookings;
 };
 
-export const deleteAdminBooking = async (id: number, adminKey: string): Promise<void> => {
-  await requestAdmin<{ message: string }>(`/api/admin/bookings/${id}`, adminKey, {
+export const deleteAdminBooking = async (
+  id: number,
+  adminKey: string,
+  options?: { masterPassword?: string; tenantSlug?: string },
+): Promise<void> => {
+  await requestAdmin<{ message: string }>(withTenantQuery(`/api/admin/bookings/${id}`, options?.tenantSlug), adminKey, {
     method: 'DELETE',
+    body: options?.masterPassword ? JSON.stringify({ masterPassword: options.masterPassword }) : undefined,
   });
 };
 
 export const resetAdminBookingsHistory = async (
   adminKey: string,
+  options?: { masterPassword?: string; tenantSlug?: string },
 ): Promise<{ deleted: number; linkedFinanceDeleted: number; calendarEventsRemoved: number }> => {
   return requestAdmin<{ deleted: number; linkedFinanceDeleted: number; calendarEventsRemoved: number }>(
-    '/api/admin/bookings/reset',
+    withTenantQuery('/api/admin/bookings/reset', options?.tenantSlug),
     adminKey,
     {
       method: 'POST',
+      body: options?.masterPassword ? JSON.stringify({ masterPassword: options.masterPassword }) : undefined,
     },
   );
 };

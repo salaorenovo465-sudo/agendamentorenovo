@@ -235,9 +235,13 @@ type DangerConfirmModalProps = {
   confirmText: string;
   confirmLabel: string;
   helperText?: string;
+  requireMasterPassword?: boolean;
+  passwordLabel?: string;
+  passwordPlaceholder?: string;
+  passwordHelperText?: string;
   busy?: boolean;
   onClose: () => void;
-  onConfirm: () => void | Promise<void>;
+  onConfirm: (masterPassword?: string) => void | Promise<void>;
 };
 
 export function DangerConfirmModal({
@@ -248,24 +252,33 @@ export function DangerConfirmModal({
   confirmText,
   confirmLabel,
   helperText,
+  requireMasterPassword = false,
+  passwordLabel = 'Senha master',
+  passwordPlaceholder = 'Digite a senha master',
+  passwordHelperText = 'A senha master e obrigatoria para concluir esta acao.',
   busy = false,
   onClose,
   onConfirm,
 }: DangerConfirmModalProps) {
   const [confirmation, setConfirmation] = useState('');
+  const [masterPassword, setMasterPassword] = useState('');
 
   useEffect(() => {
-    if (isOpen) setConfirmation('');
+    if (isOpen) {
+      setConfirmation('');
+      setMasterPassword('');
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
   const normalizedConfirmText = confirmText.trim().toUpperCase();
   const isMatch = confirmation.trim().toUpperCase() === normalizedConfirmText;
+  const hasPassword = !requireMasterPassword || masterPassword.trim().length > 0;
 
   const handleConfirm = async () => {
-    if (!isMatch || busy) return;
-    await onConfirm();
+    if (!isMatch || !hasPassword || busy) return;
+    await onConfirm(requireMasterPassword ? masterPassword.trim() : undefined);
   };
 
   return (
@@ -320,13 +333,35 @@ export function DangerConfirmModal({
             placeholder={confirmText}
             className="admin-input"
           />
+          {requireMasterPassword && (
+            <>
+              <label className="admin-label" style={{ marginTop: 12 }}>{passwordLabel}</label>
+              <input
+                type="password"
+                value={masterPassword}
+                onChange={(event) => setMasterPassword(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape' && !busy) onClose();
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void handleConfirm();
+                  }
+                }}
+                placeholder={passwordPlaceholder}
+                className="admin-input"
+              />
+              <p className="admin-modal-subtitle" style={{ marginTop: 10 }}>
+                {passwordHelperText}
+              </p>
+            </>
+          )}
           <p className="admin-modal-subtitle" style={{ marginTop: 12 }}>
             {helperText || 'Esta limpeza remove os dados tambem do Supabase e nao pode ser desfeita.'}
           </p>
         </div>
         <div className="admin-modal-footer admin-modal-footer-split">
           <button type="button" onClick={onClose} className="admin-btn-outline px-4 py-2 text-sm" disabled={busy}>Cancelar</button>
-          <button type="button" onClick={() => void handleConfirm()} className="admin-btn-danger px-4 py-2 text-sm" disabled={!isMatch || busy}>
+          <button type="button" onClick={() => void handleConfirm()} className="admin-btn-danger px-4 py-2 text-sm" disabled={!isMatch || !hasPassword || busy}>
             {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
             {busy ? 'Limpando...' : confirmLabel}
           </button>

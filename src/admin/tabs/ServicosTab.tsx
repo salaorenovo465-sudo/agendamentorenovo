@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Eye, Flower2, Heart, Loader2, Palette, Plus, Scissors, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
+import { Eye, Flower2, Heart, Loader2, Lock, Palette, Plus, Scissors, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
 
 import { toast } from '../AdminHelpers';
 import type { ServiceCatalogCategory, ServiceCatalogItem } from '../collaboratorUtils';
@@ -24,6 +24,22 @@ type ServiceEditor = {
   durationMin: string;
   active: boolean;
 };
+
+type DeleteIntent =
+  | {
+      kind: 'service';
+      name: string;
+      serviceId?: number;
+      catIdx: number;
+      itemIdx: number;
+    }
+  | {
+      kind: 'category';
+      categoryName: string;
+      serviceIds: number[];
+      serviceCount: number;
+      catIdx: number;
+    };
 
 const cloneCatalog = (catalog: ServiceCatalogCategory[]): ServiceCatalogCategory[] =>
   catalog.map((category) => ({
@@ -207,20 +223,25 @@ export function ServicosTab({
   onDeleteService,
   onDeleteCategory,
   onBootstrapCatalog,
+  onVerifyMasterPassword,
 }: {
   localServices: ServiceCatalogCategory[];
   loading: boolean;
   managedCatalog: boolean;
   onCreateService: (payload: Record<string, unknown>) => Promise<void>;
   onUpdateService: (id: number, payload: Record<string, unknown>) => Promise<void>;
-  onDeleteService: (id: number) => Promise<void>;
-  onDeleteCategory: (serviceIds: number[]) => Promise<void>;
+  onDeleteService: (id: number, masterPassword: string) => Promise<void>;
+  onDeleteCategory: (serviceIds: number[], masterPassword: string) => Promise<void>;
   onBootstrapCatalog: (catalog: ServiceCatalogCategory[]) => Promise<void>;
+  onVerifyMasterPassword: (password: string) => Promise<boolean>;
 }) {
   const [editor, setEditor] = useState<ServiceEditor | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
-  const [deletingCategory, setDeletingCategory] = useState<string | null>(null);
+  const [deleteIntent, setDeleteIntent] = useState<DeleteIntent | null>(null);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
   const categoryNames = useMemo(
     () => localServices.map((category) => category.category),
@@ -236,6 +257,13 @@ export function ServicosTab({
     if (submitting && !force) return;
     setEditor(null);
     setModalError('');
+  };
+
+  const closeDeleteDialog = (force = false) => {
+    if (deleteSubmitting && !force) return;
+    setDeleteIntent(null);
+    setDeletePassword('');
+    setDeleteError('');
   };
 
   const openCreateEditor = (preferredCategory?: string) => {
@@ -317,80 +345,112 @@ export function ServicosTab({
     }
   };
 
-  const handleDeleteService = async () => {
-    if (!editor || submitting || editor.catIdx === null || editor.itemIdx === null) {
+  const openDeleteServiceDialog = () => {
+    if (!editor || submitting || deleteSubmitting || editor.catIdx === null || editor.itemIdx === null) {
       return;
     }
 
-    if (!window.confirm(`Remover o servico "${editor.name}" do catalogo?`)) {
-      return;
-    }
-
-    setSubmitting(true);
-    setModalError('');
-
-    try {
-      if (!managedCatalog) {
-        const nextCatalog = removeServiceFromCatalog(localServices, editor.catIdx, editor.itemIdx);
-        await onBootstrapCatalog(nextCatalog);
-        toast.success('Catalogo quantico ativado com a exclusao do servico.');
-        closeEditor(true);
-        return;
-      }
-
-      if (!editor.serviceId) {
-        setModalError('Este servico ainda nao possui identificador persistido para exclusao.');
-        return;
-      }
-
-      await onDeleteService(editor.serviceId);
-      toast.success('Servico removido do catalogo.');
-      closeEditor(true);
-    } catch (error) {
-      setModalError(error instanceof Error ? error.message : 'Nao foi possivel remover o servico.');
-    } finally {
-      setSubmitting(false);
-    }
+    setDeleteError('');
+    setDeletePassword('');
+    setDeleteIntent({
+      kind: 'service',
+      name: editor.name,
+      serviceId: editor.serviceId,
+      catIdx: editor.catIdx,
+      itemIdx: editor.itemIdx,
+    });
   };
 
-  const handleDeleteCategory = async (category: ServiceCatalogCategory, catIdx: number) => {
-    if (deletingCategory) {
+  const openDeleteCategoryDialog = (category: ServiceCatalogCategory, catIdx: number) => {
+    if (deleteIntent || deleteSubmitting || submitting) {
       return;
     }
 
-    const message = managedCatalog
-      ? `Excluir a categoria "${category.category}" e remover ${category.items.length} servico(s) persistido(s)?`
-      : `Excluir a categoria "${category.category}" do catalogo padrao e migrar o restante para o modo quantico gerenciado?`;
+    setDeleteError('');
+    setDeletePassword('');
+    setDeleteIntent({
+      kind: 'category',
+      categoryName: category.category,
+      serviceIds: category.items
+        .map((service) => service.id)
+        .filter((value): value is number => typeof value === 'number'),
+      serviceCount: category.items.length,
+      catIdx,
+    });
+  };
 
-    if (!window.confirm(message)) {
+  const confirmDeleteIntent = async () => {
+    if (!deleteIntent || deleteSubmitting) {
       return;
     }
 
-    setDeletingCategory(category.category);
+    const password = deletePassword.trim();
+    if (!password) {
+      setDeleteError('Digite a senha master para confirmar a exclusao.');
+      return;
+    }
+
+    setDeleteSubmitting(true);
+    setDeleteError('');
 
     try {
-      if (!managedCatalog) {
-        const nextCatalog = normalizeCatalog(localServices.filter((_, index) => index !== catIdx));
-        await onBootstrapCatalog(nextCatalog);
-        toast.success('Categoria removida e catalogo migrado para o modo quantico.');
+      const allowed = await onVerifyMasterPassword(password);
+      if (!allowed) {
+        setDeleteError('Senha master invalida.');
         return;
       }
 
-      const serviceIds = category.items
-        .map((service) => service.id)
-        .filter((value): value is number => typeof value === 'number');
+      if (deleteIntent.kind === 'service') {
+        if (!managedCatalog) {
+          const nextCatalog = removeServiceFromCatalog(localServices, deleteIntent.catIdx, deleteIntent.itemIdx);
+          await onBootstrapCatalog(nextCatalog);
+          toast.success('Servico removido e catalogo persistido no Supabase.');
+          closeEditor(true);
+          closeDeleteDialog(true);
+          return;
+        }
 
-      await onDeleteCategory(serviceIds);
-      toast.success('Categoria removida com todos os servicos associados.');
+        if (!deleteIntent.serviceId) {
+          setDeleteError('Este servico ainda nao possui identificador persistido para exclusao.');
+          return;
+        }
+
+        await onDeleteService(deleteIntent.serviceId, password);
+        toast.success('Servico removido do catalogo e do Supabase.');
+        closeEditor(true);
+        closeDeleteDialog(true);
+        return;
+      }
+
+      if (!managedCatalog) {
+        const nextCatalog = normalizeCatalog(localServices.filter((_, index) => index !== deleteIntent.catIdx));
+        await onBootstrapCatalog(nextCatalog);
+        toast.success('Categoria removida e catalogo persistido no Supabase.');
+        closeDeleteDialog(true);
+        return;
+      }
+
+      if (deleteIntent.serviceIds.length === 0) {
+        setDeleteError('Esta categoria nao possui servicos persistidos para exclusao.');
+        return;
+      }
+
+      await onDeleteCategory(deleteIntent.serviceIds, password);
+      toast.success('Categoria removida com todos os servicos associados no Supabase.');
+      closeDeleteDialog(true);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Nao foi possivel remover a categoria.');
+      setDeleteError(error instanceof Error ? error.message : 'Nao foi possivel concluir a exclusao.');
     } finally {
-      setDeletingCategory(null);
+      setDeleteSubmitting(false);
     }
   };
 
   const editorCategoryName = editor ? resolveEditorCategory(editor) : '';
   const editorPreviewPrice = editor ? formatPriceLabel(editor.priceType, editor.priceValue) : 'Sob consulta';
+  const deletionLocked = deleteSubmitting || Boolean(deleteIntent);
+  const deleteIntentLabel = deleteIntent?.kind === 'service'
+    ? deleteIntent.name
+    : deleteIntent?.categoryName || '';
 
   return (
     <div className="space-y-6">
@@ -404,7 +464,7 @@ export function ServicosTab({
             </p>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button className="admin-btn-outline" onClick={() => openCreateEditor()} disabled={loading || submitting} style={{ padding: '11px 16px' }}>
+            <button className="admin-btn-outline" onClick={() => openCreateEditor()} disabled={loading || submitting || deletionLocked} style={{ padding: '11px 16px' }}>
               <WandSparkles style={{ width: 15, height: 15 }} />
               Novo servico
             </button>
@@ -414,7 +474,7 @@ export function ServicosTab({
                 const editorState = buildCreateEditor(localServices);
                 setEditor({ ...editorState, categoryMode: 'new', selectedCategory: '', newCategory: '' });
               }}
-              disabled={loading || submitting}
+              disabled={loading || submitting || deletionLocked}
               style={{ padding: '11px 16px' }}
             >
               <Plus style={{ width: 15, height: 15 }} />
@@ -488,17 +548,19 @@ export function ServicosTab({
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                  <button className="admin-btn-outline" onClick={() => openCreateEditor(category.category)} disabled={loading || submitting || Boolean(deletingCategory)} style={{ padding: '10px 14px' }}>
+                  <button className="admin-btn-outline" onClick={() => openCreateEditor(category.category)} disabled={loading || submitting || deletionLocked} style={{ padding: '10px 14px' }}>
                     <Plus style={{ width: 14, height: 14 }} />
                     Adicionar servico
                   </button>
                   <button
                     className="admin-btn-danger"
-                    onClick={() => { void handleDeleteCategory(category, catIdx); }}
-                    disabled={loading || submitting || deletingCategory === category.category}
+                    onClick={() => openDeleteCategoryDialog(category, catIdx)}
+                    disabled={loading || submitting || deletionLocked}
                     style={{ padding: '10px 14px' }}
                   >
-                    {deletingCategory === category.category ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Trash2 style={{ width: 14, height: 14 }} />}
+                    {deleteSubmitting && deleteIntent?.kind === 'category' && deleteIntent.categoryName === category.category
+                      ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" />
+                      : <Trash2 style={{ width: 14, height: 14 }} />}
                     Excluir categoria
                   </button>
                 </div>
@@ -757,8 +819,10 @@ export function ServicosTab({
             <div className="admin-modal-footer" style={{ justifyContent: editor.mode === 'edit' ? 'space-between' : 'flex-end' }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 {editor.mode === 'edit' && (
-                  <button className="admin-btn-danger" onClick={() => { void handleDeleteService(); }} disabled={submitting}>
-                    {submitting ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Trash2 style={{ width: 14, height: 14 }} />}
+                  <button className="admin-btn-danger" onClick={openDeleteServiceDialog} disabled={submitting || deletionLocked}>
+                    {deleteSubmitting && deleteIntent?.kind === 'service'
+                      ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" />
+                      : <Trash2 style={{ width: 14, height: 14 }} />}
                     Excluir servico
                   </button>
                 )}
@@ -770,6 +834,74 @@ export function ServicosTab({
                   {editor.mode === 'create' ? 'Salvar servico' : 'Atualizar servico'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {deleteIntent && (
+        <div className="admin-modal-root" style={{ zIndex: 1410 }}>
+          <div className="admin-modal-overlay" onClick={() => closeDeleteDialog()} />
+          <div className="admin-modal-card admin-modal-card-sm" role="dialog" aria-modal="true" style={{ maxWidth: 520 }}>
+            <div className="admin-modal-header admin-modal-header-compact">
+              <div className="admin-modal-icon admin-modal-icon-gold">
+                <Lock style={{ width: 17, height: 17, color: 'var(--admin-accent)' }} />
+              </div>
+              <div>
+                <h3 className="admin-modal-title">
+                  {deleteIntent.kind === 'service' ? 'Excluir servico com senha master' : 'Excluir categoria com senha master'}
+                </h3>
+                <p className="admin-modal-subtitle">
+                  {managedCatalog
+                    ? 'A exclusao sera aplicada diretamente no Supabase.'
+                    : 'A exclusao vai migrar o catalogo resultante para o modo gerenciado no Supabase.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="admin-modal-body">
+              <div style={{ display: 'grid', gap: 14 }}>
+                <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid rgba(220,38,38,0.16)', background: 'rgba(220,38,38,0.05)' }}>
+                  <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: '#991b1b', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Confirmacao critica</span>
+                  <strong style={{ display: 'block', marginTop: 6, fontSize: 15, color: 'var(--admin-text)' }}>{deleteIntentLabel}</strong>
+                  <p style={{ margin: '6px 0 0', fontSize: 12.5, lineHeight: 1.6, color: 'var(--admin-text-muted)' }}>
+                    {deleteIntent.kind === 'service'
+                      ? 'O servico sera removido do catalogo administrativo.'
+                      : `${deleteIntent.serviceCount} servico(s) da categoria serao removidos em conjunto.`}
+                  </p>
+                </div>
+
+                <label className="admin-label" style={{ marginBottom: 0 }}>Senha master</label>
+                <input
+                  type="password"
+                  className="admin-input"
+                  value={deletePassword}
+                  onChange={(event) => {
+                    setDeletePassword(event.target.value);
+                    if (deleteError) setDeleteError('');
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      void confirmDeleteIntent();
+                    }
+                  }}
+                  placeholder="Digite a senha master para excluir"
+                  disabled={deleteSubmitting}
+                  autoFocus
+                />
+
+                {deleteError && <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#dc2626' }}>{deleteError}</p>}
+              </div>
+            </div>
+
+            <div className="admin-modal-footer">
+              <button className="admin-btn-outline" onClick={() => closeDeleteDialog()} disabled={deleteSubmitting}>
+                Cancelar
+              </button>
+              <button className="admin-btn-danger" onClick={() => { void confirmDeleteIntent(); }} disabled={deleteSubmitting}>
+                {deleteSubmitting ? <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> : <Trash2 style={{ width: 14, height: 14 }} />}
+                Confirmar exclusao
+              </button>
             </div>
           </div>
         </div>

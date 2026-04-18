@@ -161,7 +161,7 @@ export function AnalyticsTab({
   analyticsSubTab: 'geral' | 'colaboradores';
   setAnalyticsSubTab: (tab: 'geral' | 'colaboradores') => void;
   dateLabel: string;
-  onClearHistory: () => Promise<void>;
+  onClearHistory: (masterPassword?: string) => Promise<void>;
 }) {
   const [selectedCollaboratorId, setSelectedCollaboratorId] = useState<number | null>(null);
   const [clearingHistory, setClearingHistory] = useState(false);
@@ -185,10 +185,10 @@ export function AnalyticsTab({
     }));
   }, [allBookings, bookings, collaborators]);
 
-  const handleClearHistory = async () => {
+  const handleClearHistory = async (masterPassword?: string) => {
     setClearingHistory(true);
     try {
-      await onClearHistory();
+      await onClearHistory(masterPassword);
       setSelectedCollaboratorId(null);
       setClearHistoryModalOpen(false);
     } finally {
@@ -276,6 +276,8 @@ export function AnalyticsTab({
         confirmText="LIMPAR HISTORICO TOTAL"
         confirmLabel="Apagar historico total"
         helperText="Esta limpeza atua direto no Supabase e remove o historico completo usado em analytics, agenda e pagamentos."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para limpar o historico total"
         busy={clearingHistory}
         onClose={() => setClearHistoryModalOpen(false)}
         onConfirm={handleClearHistory}

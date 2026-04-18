@@ -660,13 +660,16 @@ export default function AdminApp() {
     }
   };
 
-  const handleDeleteBooking = async (booking: AdminBooking) => {
-    if (!adminKey || !window.confirm(`Excluir permanentemente o agendamento de ${booking.name}? Esta ação não pode ser desfeita.`)) return;
+  const handleDeleteBooking = async (booking: AdminBooking, masterPassword: string) => {
+    if (!adminKey) return;
     setBusyBookingId(booking.id);
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await deleteAdminBooking(booking.id, adminKey);
+        await deleteAdminBooking(booking.id, adminKey, {
+          masterPassword,
+          tenantSlug: activeTenant,
+        });
       });
       toast.success('Agendamento excluído.');
     } catch (err) {
@@ -759,9 +762,12 @@ export default function AdminApp() {
     }
   };
 
-  const handleDeleteEntity = async (entity: WorkbenchEntity, id: number) => {
+  const handleDeleteEntity = async (entity: WorkbenchEntity, id: number, masterPassword?: string) => {
     if (!adminKey) return;
-    await deleteWorkbenchEntityForAdmin(entity, id, adminKey);
+    await deleteWorkbenchEntityForAdmin(entity, id, adminKey, {
+      masterPassword,
+      tenantSlug: activeTenant,
+    });
     await loadEntity(entity);
     if (entity === 'finance' || entity === 'tasks' || entity === 'leads') {
       await loadOverview();
@@ -794,20 +800,41 @@ export default function AdminApp() {
     await loadEntity('services');
   };
 
-  const handleDeleteServiceCategory = async (serviceIds: number[]) => {
+  const handleVerifyServiceDeletePassword = async (password: string): Promise<boolean> => {
+    if (!adminKey) return false;
+    return verifyMasterPasswordForAdmin(password, adminKey, activeTenant);
+  };
+
+  const handleDeleteService = async (id: number, masterPassword: string) => {
+    if (!adminKey) return;
+    await deleteWorkbenchEntityForAdmin('services', id, adminKey, {
+      masterPassword,
+      tenantSlug: activeTenant,
+    });
+    await loadEntity('services');
+  };
+
+  const handleDeleteServiceCategory = async (serviceIds: number[], masterPassword: string) => {
     if (!adminKey) return;
 
     for (const id of serviceIds) {
-      await deleteWorkbenchEntityForAdmin('services', id, adminKey);
+      await deleteWorkbenchEntityForAdmin('services', id, adminKey, {
+        masterPassword,
+        tenantSlug: activeTenant,
+      });
     }
 
     await loadEntity('services');
   };
 
   const handleResetFinance = async (password: string, date?: string): Promise<boolean> => {
-    if (!adminKey || password !== adminKey) return false;
+    if (!adminKey) return false;
     try {
-      await resetFinanceForAdmin(adminKey, date);
+      await resetFinanceForAdmin(adminKey, {
+        date,
+        masterPassword: password,
+        tenantSlug: activeTenant,
+      });
       toast.success('Financeiro zerado com sucesso!');
       void loadOverview();
       return true;
@@ -816,12 +843,15 @@ export default function AdminApp() {
     }
   };
 
-  const handleResetPaymentsHistory = async (): Promise<void> => {
+  const handleResetPaymentsHistory = async (masterPassword?: string): Promise<void> => {
     if (!adminKey) return;
     setError('');
 
     try {
-      const result = await resetFinanceForAdmin(adminKey);
+      const result = await resetFinanceForAdmin(adminKey, {
+        masterPassword,
+        tenantSlug: activeTenant,
+      });
       toast.success(`${result.deleted} lancamento(s) financeiro(s) removido(s).`);
       await Promise.all([loadOverview(), loadEntity('finance')]);
     } catch (err) {
@@ -832,12 +862,15 @@ export default function AdminApp() {
     }
   };
 
-  const handleResetAgendaHistory = async (): Promise<void> => {
+  const handleResetAgendaHistory = async (masterPassword?: string): Promise<void> => {
     if (!adminKey) return;
     setError('');
 
     try {
-      const result = await resetAdminBookingsHistory(adminKey);
+      const result = await resetAdminBookingsHistory(adminKey, {
+        masterPassword,
+        tenantSlug: activeTenant,
+      });
       setRescheduleMap({});
       toast.success(
         `${result.deleted} agendamento(s) removido(s). ${result.linkedFinanceDeleted || 0} extrato(s) vinculado(s) tambem foram apagados.`,
@@ -851,12 +884,15 @@ export default function AdminApp() {
     }
   };
 
-  const handleResetAnalyticsHistory = async (): Promise<void> => {
+  const handleResetAnalyticsHistory = async (masterPassword?: string): Promise<void> => {
     if (!adminKey) return;
     setError('');
 
     try {
-      const result = await resetAnalyticsHistoryForAdmin(adminKey);
+      const result = await resetAnalyticsHistoryForAdmin(adminKey, {
+        masterPassword,
+        tenantSlug: activeTenant,
+      });
       setRescheduleMap({});
       toast.success(
         `Historico total limpo: ${result.deleted.bookings} agendamento(s), ${result.deleted.finance} financeiro(s), ${result.deleted.leads} lead(s), ${result.deleted.tasks} tarefa(s) e ${result.deleted.reviews} avaliacao(oes).`,
@@ -1156,9 +1192,10 @@ export default function AdminApp() {
               managedCatalog={settings.serviceCatalogManaged === true || entityRows.services.length > 0}
               onCreateService={(payload) => handleCreateEntity('services', payload)}
               onUpdateService={(id, payload) => handleUpdateEntity('services', id, payload)}
-              onDeleteService={(id) => handleDeleteEntity('services', id)}
+              onDeleteService={handleDeleteService}
               onDeleteCategory={handleDeleteServiceCategory}
               onBootstrapCatalog={handleServiceCatalogBootstrap}
+              onVerifyMasterPassword={handleVerifyServiceDeletePassword}
             />
           )}
 

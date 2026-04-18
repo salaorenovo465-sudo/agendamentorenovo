@@ -34,6 +34,61 @@ import { toPositiveInt, parseId as parseBookingId, getTodayDate } from '../utils
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}(:\d{2})?$/;
+const TENANT_REGEX = /^[a-z0-9-]{2,50}$/;
+
+const parseTenantFromQuery = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return TENANT_REGEX.test(normalized) ? normalized : null;
+};
+
+const getPayloadString = (payload: Record<string, unknown> | null, key: string): string => {
+  const value = payload?.[key];
+  return typeof value === 'string' ? value.trim() : '';
+};
+
+const getRequestFallbackMasterPassword = (req: { headers: Record<string, unknown> }): string => {
+  const adminHeader = req.headers['x-admin-key'];
+  const adminKey = Array.isArray(adminHeader) ? adminHeader[0] : adminHeader;
+  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || (typeof adminKey === 'string' ? adminKey.trim() : '');
+};
+
+const resolveMasterPassword = (settings: Record<string, unknown>, fallbackPassword: string): string => {
+  const configured = typeof settings.masterPassword === 'string' ? settings.masterPassword.trim() : '';
+  return configured || fallbackPassword;
+};
+
+const validateMasterPassword = async (
+  req: { body?: unknown; query: Record<string, unknown>; headers: Record<string, unknown> },
+): Promise<{ ok: true; tenant?: string } | { ok: false; status: number; error: string }> => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return { ok: false, status: 400, error: 'Slug de tenant invalido.' };
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  const masterPassword = getPayloadString(payload, 'masterPassword');
+  if (!masterPassword) {
+    return { ok: false, status: 400, error: 'Informe a senha master.' };
+  }
+
+  const settings = workbenchStore.isEnabled()
+    ? await workbenchStore.getSettings(tenant || undefined)
+    : {};
+
+  if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+    return { ok: false, status: 403, error: 'Senha master invalida.' };
+  }
+
+  return { ok: true, tenant: tenant || undefined };
+};
 
 const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
   if (!Array.isArray(value)) {
@@ -214,8 +269,13 @@ adminRoutes.get('/bookings', async (req, res) => {
   }
 });
 
-adminRoutes.post('/bookings/reset', async (_req, res) => {
+adminRoutes.post('/bookings/reset', async (req, res) => {
   try {
+    const passwordValidation = await validateMasterPassword(req);
+    if (passwordValidation.ok === false) {
+      return res.status(passwordValidation.status).json({ error: passwordValidation.error });
+    }
+
     const currentBookings = await bookingStore.listAll();
     let linkedFinanceDeleted = 0;
 
@@ -238,8 +298,13 @@ adminRoutes.post('/bookings/reset', async (_req, res) => {
   }
 });
 
-adminRoutes.post('/history/reset', async (_req, res) => {
+adminRoutes.post('/history/reset', async (req, res) => {
   try {
+    const passwordValidation = await validateMasterPassword(req);
+    if (passwordValidation.ok === false) {
+      return res.status(passwordValidation.status).json({ error: passwordValidation.error });
+    }
+
     if (!workbenchStore.isEnabled()) {
       return res.status(503).json({ error: 'Modulo workbench indisponivel para limpar o historico total.' });
     }
@@ -536,6 +601,11 @@ adminRoutes.delete('/bookings/:id', async (req, res) => {
   }
 
   try {
+    const passwordValidation = await validateMasterPassword(req);
+    if (passwordValidation.ok === false) {
+      return res.status(passwordValidation.status).json({ error: passwordValidation.error });
+    }
+
     const booking = await bookingStore.getById(bookingId);
     if (!booking) {
       return res.status(404).json({ error: 'Agendamento não encontrado.' });

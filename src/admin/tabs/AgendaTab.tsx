@@ -179,11 +179,11 @@ export function AgendaTab({
   onConfirm: (booking: AdminBooking) => Promise<void>;
   onComplete: (booking: AdminBooking) => Promise<void>;
   onReject: (booking: AdminBooking) => Promise<void>;
-  onDelete: (booking: AdminBooking) => Promise<void>;
+  onDelete: (booking: AdminBooking, masterPassword: string) => Promise<void>;
   onReschedule: (booking: AdminBooking) => Promise<void>;
   onCreateBooking: (payload: AdminCreateBookingPayload) => Promise<void>;
   onAssignProfessional: (booking: AdminBooking, professionalId: number | null) => Promise<void>;
-  onClearHistory: () => Promise<void>;
+  onClearHistory: (masterPassword?: string) => Promise<void>;
   serviceCatalog: ServiceCatalogCategory[];
   clients: Record<string, unknown>[];
   professionals: Record<string, unknown>[];
@@ -197,6 +197,8 @@ export function AgendaTab({
   const [submitting, setSubmitting] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
+  const [deleteBookingTarget, setDeleteBookingTarget] = useState<AdminBooking | null>(null);
+  const [deletingBooking, setDeletingBooking] = useState(false);
   const [expandedPanel, setExpandedPanel] = useState<ExpandedAgendaPanel | null>(null);
   const [scrollingColumns, setScrollingColumns] = useState<Record<string, boolean>>({});
   const panelCloseTimer = useRef<number | null>(null);
@@ -473,13 +475,30 @@ export function AgendaTab({
     }));
   };
 
-  const handleClearHistory = async () => {
+  const handleClearHistory = async (masterPassword?: string) => {
     setClearingHistory(true);
     try {
-      await onClearHistory();
+      await onClearHistory(masterPassword);
       setClearHistoryModalOpen(false);
     } finally {
       setClearingHistory(false);
+    }
+  };
+
+  const handleDeleteBooking = async (masterPassword?: string) => {
+    if (!deleteBookingTarget || !masterPassword) {
+      return;
+    }
+
+    setDeletingBooking(true);
+    try {
+      await onDelete(deleteBookingTarget, masterPassword);
+      if (expandedBookingId === deleteBookingTarget.id) {
+        closeExpandedPanel();
+      }
+      setDeleteBookingTarget(null);
+    } finally {
+      setDeletingBooking(false);
     }
   };
 
@@ -667,7 +686,7 @@ export function AgendaTab({
               <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
             </button>
           )}
-          <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
+          <button disabled={busy || deletingBooking} onClick={() => setDeleteBookingTarget(booking)} className="admin-btn-outline agenda-delete-btn">
             <Trash2 style={{ width: 12, height: 12 }} /> Excluir
           </button>
         </div>
@@ -854,9 +873,30 @@ export function AgendaTab({
         confirmText="LIMPAR AGENDA"
         confirmLabel="Apagar agenda"
         helperText="Esta limpeza remove o historico de agendamentos diretamente do Supabase e tenta excluir os eventos vinculados da agenda externa."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para limpar a agenda"
         busy={clearingHistory}
         onClose={() => setClearHistoryModalOpen(false)}
         onConfirm={handleClearHistory}
+      />
+
+      <DangerConfirmModal
+        isOpen={Boolean(deleteBookingTarget)}
+        title="Excluir agendamento"
+        subtitle="O registro sera removido da agenda operacional"
+        description={`Digite EXCLUIR AGENDAMENTO para apagar o agendamento de ${deleteBookingTarget?.name || 'este cliente'} e remover o registro vinculado.`}
+        confirmText="EXCLUIR AGENDAMENTO"
+        confirmLabel="Excluir agendamento"
+        helperText="Esta exclusao remove o agendamento do Supabase e tenta apagar o evento vinculado no calendario quando existir."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para excluir o agendamento"
+        busy={deletingBooking}
+        onClose={() => {
+          if (!deletingBooking) {
+            setDeleteBookingTarget(null);
+          }
+        }}
+        onConfirm={handleDeleteBooking}
       />
 
       {createOpen && (

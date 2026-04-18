@@ -1,5 +1,5 @@
 import type { WorkbenchEntity, WorkbenchOverview } from '../types';
-import { requestAdmin } from './apiCore';
+import { requestAdmin, withTenantQuery } from './apiCore';
 
 type ResetAnalyticsHistoryResponse = {
   deleted: {
@@ -76,35 +76,61 @@ export const updateWorkbenchEntityForAdmin = async (
   return response.row;
 };
 
-export const deleteWorkbenchEntityForAdmin = async (entity: WorkbenchEntity, id: number, adminKey: string): Promise<void> => {
-  await requestAdmin<{ message: string }>(`/api/admin/workbench/${entity}/${id}`, adminKey, {
-    method: 'DELETE',
-  });
+export const deleteWorkbenchEntityForAdmin = async (
+  entity: WorkbenchEntity,
+  id: number,
+  adminKey: string,
+  options?: {
+    masterPassword?: string;
+    tenantSlug?: string;
+  },
+): Promise<void> => {
+  await requestAdmin<{ message: string }>(
+    withTenantQuery(`/api/admin/workbench/${entity}/${id}`, options?.tenantSlug),
+    adminKey,
+    {
+      method: 'DELETE',
+      body: options?.masterPassword ? JSON.stringify({ masterPassword: options.masterPassword }) : undefined,
+    },
+  );
 };
 
 export const resetFinanceForAdmin = async (
   adminKey: string,
-  date?: string,
+  options?: {
+    date?: string;
+    masterPassword?: string;
+    tenantSlug?: string;
+  },
 ): Promise<{ deleted: number; bookingsReset?: number }> =>
-  requestAdmin<{ deleted: number; bookingsReset?: number }>('/api/admin/workbench/finance/reset', adminKey, {
+  requestAdmin<{ deleted: number; bookingsReset?: number }>(withTenantQuery('/api/admin/workbench/finance/reset', options?.tenantSlug), adminKey, {
     method: 'POST',
-    body: JSON.stringify(date ? { date } : {}),
+    body: JSON.stringify({
+      ...(options?.date ? { date: options.date } : {}),
+      ...(options?.masterPassword ? { masterPassword: options.masterPassword } : {}),
+    }),
   });
 
 export const resetAnalyticsHistoryForAdmin = async (
   adminKey: string,
+  options?: {
+    masterPassword?: string;
+    tenantSlug?: string;
+  },
 ): Promise<ResetAnalyticsHistoryResponse> => {
   try {
-    return await requestAdmin<ResetAnalyticsHistoryResponse>('/api/admin/history/reset', adminKey, {
+    return await requestAdmin<ResetAnalyticsHistoryResponse>(withTenantQuery('/api/admin/history/reset', options?.tenantSlug), adminKey, {
       method: 'POST',
+      body: JSON.stringify(options?.masterPassword ? { masterPassword: options.masterPassword } : {}),
     });
   } catch (error) {
     if (!isNotFoundError(error)) {
       throw error;
     }
 
-    return requestAdmin<ResetAnalyticsHistoryResponse>('/api/admin/workbench/history/reset', adminKey, {
+    return requestAdmin<ResetAnalyticsHistoryResponse>(withTenantQuery('/api/admin/workbench/history/reset', options?.tenantSlug), adminKey, {
       method: 'POST',
+      body: JSON.stringify(options?.masterPassword ? { masterPassword: options.masterPassword } : {}),
     });
   }
 };

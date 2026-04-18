@@ -1,4 +1,6 @@
+import { useState } from 'react';
 import { Plus } from 'lucide-react';
+import { DangerConfirmModal } from '../AdminHelpers';
 import { toNumber, toStringValue, ENTITY_FIELDS } from '../AdminUtils';
 import { CrudTab } from '../CrudTab';
 
@@ -15,12 +17,27 @@ export function DisponibilidadeTab({
   showNewRule: boolean;
   setShowNewRule: (show: boolean) => void;
   onCreateEntity: (entity: 'availability', payload: Record<string, unknown>) => Promise<void>;
-  onDeleteEntity: (entity: 'availability', id: number) => Promise<void>;
+  onDeleteEntity: (entity: 'availability', id: number, masterPassword?: string) => Promise<void>;
 }) {
+  const [deleteTarget, setDeleteTarget] = useState<Record<string, unknown> | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const folgas = rules.filter((r) => toStringValue(r.type) === 'folga');
   const horarios = rules.filter((r) => toStringValue(r.type) === 'horario' || toStringValue(r.type) === 'pausa');
   const bloqueios = rules.filter((r) => toStringValue(r.type) === 'feriado' || toStringValue(r.type) === 'bloqueio');
   const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+
+  const handleConfirmDelete = async (masterPassword?: string) => {
+    const id = deleteTarget ? toNumber(deleteTarget.id) : 0;
+    if (!id || !masterPassword) return;
+
+    setDeleting(true);
+    try {
+      await onDeleteEntity('availability', id, masterPassword);
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <div>
@@ -42,7 +59,7 @@ export function DisponibilidadeTab({
                 <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-confirmed">
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
                   <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{weekdays[toNumber(r.weekday)] || ''} • {toStringValue(r.start_time)} - {toStringValue(r.end_time)}</p>
-                  <button onClick={() => { if (window.confirm('Remover?')) void onDeleteEntity('availability', toNumber(r.id)); }} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
+                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
                 </div>
               ))}
             </div>
@@ -54,7 +71,7 @@ export function DisponibilidadeTab({
                 <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-pending">
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
                   <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{weekdays[toNumber(r.weekday)] || 'Todos'}</p>
-                  <button onClick={() => { if (window.confirm('Remover?')) void onDeleteEntity('availability', toNumber(r.id)); }} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
+                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
                 </div>
               ))}
             </div>
@@ -66,13 +83,27 @@ export function DisponibilidadeTab({
                 <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-rejected">
                   <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
                   <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{toStringValue(r.type)} • {weekdays[toNumber(r.weekday)] || ''}</p>
-                  <button onClick={() => { if (window.confirm('Remover?')) void onDeleteEntity('availability', toNumber(r.id)); }} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
+                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
                 </div>
               ))}
             </div>
           </div>
         </div>
       )}
+      <DangerConfirmModal
+        isOpen={Boolean(deleteTarget)}
+        title="Excluir regra de disponibilidade"
+        subtitle="A disponibilidade sera alterada imediatamente"
+        description={`Digite EXCLUIR REGRA para remover ${toStringValue(deleteTarget?.title) || 'esta regra'} da operacao.`}
+        confirmText="EXCLUIR REGRA"
+        confirmLabel="Excluir regra"
+        helperText="A regra sera removida do Supabase e deixa de impactar horarios, folgas e bloqueios."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para excluir a regra"
+        busy={deleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={handleConfirmDelete}
+      />
     </div>
   );
 }

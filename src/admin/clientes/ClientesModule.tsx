@@ -810,12 +810,15 @@ function ClienteModal({
     }
   };
 
-  const handleDeleteClient = async () => {
+  const handleDeleteClient = async (masterPassword?: string) => {
     if (!clientId) return;
     setSaving(true);
     setAgentError('');
     try {
-      await deleteWorkbenchEntityForAdmin('clients', clientId, adminKey);
+      await deleteWorkbenchEntityForAdmin('clients', clientId, adminKey, {
+        masterPassword,
+        tenantSlug,
+      });
       await onClientUpdated();
       setDeleteOpen(false);
       onClose();
@@ -1663,9 +1666,11 @@ function ClienteModal({
         confirmText="REMOVER CLIENTE"
         confirmLabel="Excluir cliente"
         helperText="Use apenas quando o cadastro realmente nao deve mais existir nesta carteira."
+        requireMasterPassword
+        passwordPlaceholder="Digite a senha master para excluir o cliente"
         busy={saving}
         onClose={() => setDeleteOpen(false)}
-        onConfirm={() => handleDeleteClient()}
+        onConfirm={handleDeleteClient}
       />
     </>
   );
