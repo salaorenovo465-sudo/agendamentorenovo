@@ -164,7 +164,7 @@ export type AdminSettings = {
   whatsappCloseTime?: string;
   masterPasswordUpdatedAt?: string;
   serviceCatalogManaged?: boolean;
-  whatsappProvider?: 'chatwoot' | 'legacy' | 'baileys';
+  whatsappProvider?: 'chatwoot' | 'legacy' | 'baileys' | 'evolution';
   chatwootUrl?: string;
   chatwootAccountId?: string;
   chatwootInboxId?: string;
@@ -189,4 +189,39 @@ export type AdminEvolutionInstanceStatus = {
   connected: boolean;
   qrDataUrl: string | null;
   lastError: string | null;
+};
+
+export type AdminEvolutionIntegrationSettings = {
+  provider: 'evolution';
+  configured: boolean;
+  evolutionUrl: string;
+  evolutionInstance: string;
+  evolutionSendPath: string;
+  hasApiKey: boolean;
+  apiKeyPreview: string | null;
+  hasWebhookSecret: boolean;
+  webhookSecretPreview: string | null;
+};
+
+export type AdminEvolutionIntegrationState = {
+  integration: AdminEvolutionIntegrationSettings;
+  status: AdminEvolutionInstanceStatus;
+};
+
+export type AdminEvolutionIntegrationSavePayload = {
+  evolutionUrl: string;
+  evolutionInstance: string;
+  evolutionSendPath?: string;
+  evolutionApiKey?: string;
+  evolutionWebhookSecret?: string;
+  clearApiKey?: boolean;
+  clearWebhookSecret?: boolean;
+};
+
+export type AdminEvolutionIntegrationTestResult = {
+  ok: boolean;
+  reachable: boolean;
+  instanceFound: boolean;
+  instancesCount: number;
+  error: string | null;
 };

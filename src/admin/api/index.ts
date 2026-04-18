@@ -74,6 +74,16 @@ export {
 } from './settingsApi';
 
 export {
+  getEvolutionIntegrationForAdmin,
+  saveEvolutionIntegrationForAdmin,
+  testEvolutionIntegrationForAdmin,
+  getEvolutionInstanceStatusForAdmin,
+  createEvolutionInstanceForAdmin,
+  getEvolutionInstanceQrForAdmin,
+  refreshEvolutionInstanceQrForAdmin,
+} from './integrationApi';
+
+export {
   getClientAgentStateForAdmin,
   saveClientAgentStateForAdmin,
   runClientAgentRuleForAdmin,
@@ -85,3 +95,8 @@ export type {
   ClientAgentChannel,
   ClientAgentRunResponse,
 } from './clientAgentApi';
+export type {
+  AdminEvolutionIntegrationState,
+  AdminEvolutionIntegrationSavePayload,
+  AdminEvolutionIntegrationTestResult,
+} from '../types';

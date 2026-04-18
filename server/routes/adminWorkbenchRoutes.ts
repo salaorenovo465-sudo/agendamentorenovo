@@ -4,6 +4,8 @@ import { workbenchStore, type WorkbenchEntity } from '../db/workbenchStore';
 import { bookingStore } from '../db/bookingStore';
 import { deleteCalendarEventById } from '../services/calendarService';
 import { runClientAgentRuleForTenant } from '../services/clientAgentService';
+import { testTenantEvolutionIntegration } from '../services/evolutionIntegrationService';
+import { getEvolutionInstanceStatus } from '../services/evolutionInstanceService';
 import type { BookingRecord } from '../types';
 import { getTodayDate, parseId } from '../utils/helpers';
 
@@ -21,6 +23,7 @@ const BASIC_PLATFORM_SETTINGS_KEYS = [
 ] as const;
 
 const MASTER_PASSWORD_MIN_LENGTH = 4;
+const EVOLUTION_DEFAULT_SEND_PATH = '/message/sendText/{instance}';
 const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
 const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
 const CLIENT_AGENT_MAX_EVENTS = 600;
@@ -253,6 +256,56 @@ const pickBasicPlatformSettings = (value: Record<string, unknown>): Record<strin
   return picked;
 };
 
+const maskSecret = (value: string): string | null => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.length <= 8) {
+    return `${trimmed.slice(0, 2)}••••`;
+  }
+
+  return `${trimmed.slice(0, 4)}••••${trimmed.slice(-4)}`;
+};
+
+const normalizeUrlSetting = (value: string): string => {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    const pathname = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+    return `${parsed.origin}${pathname}`;
+  } catch {
+    return '';
+  }
+};
+
+const pickEvolutionIntegrationSettings = (settings: Record<string, unknown>) => {
+  const evolutionUrl = typeof settings.evolutionUrl === 'string' ? settings.evolutionUrl.trim() : '';
+  const evolutionApiKey = typeof settings.evolutionApiKey === 'string' ? settings.evolutionApiKey.trim() : '';
+  const evolutionInstance = typeof settings.evolutionInstance === 'string' ? settings.evolutionInstance.trim() : '';
+  const evolutionSendPath = typeof settings.evolutionSendPath === 'string' && settings.evolutionSendPath.trim()
+    ? settings.evolutionSendPath.trim()
+    : EVOLUTION_DEFAULT_SEND_PATH;
+  const evolutionWebhookSecret = typeof settings.evolutionWebhookSecret === 'string' ? settings.evolutionWebhookSecret.trim() : '';
+
+  return {
+    provider: 'evolution' as const,
+    configured: Boolean(evolutionUrl && evolutionApiKey && evolutionInstance),
+    evolutionUrl,
+    evolutionInstance,
+    evolutionSendPath,
+    hasApiKey: Boolean(evolutionApiKey),
+    apiKeyPreview: maskSecret(evolutionApiKey),
+    hasWebhookSecret: Boolean(evolutionWebhookSecret),
+    webhookSecretPreview: maskSecret(evolutionWebhookSecret),
+  };
+};
+
 const isWorkbenchUnavailable = (error: unknown): boolean =>
   error instanceof Error && error.message.toLowerCase().includes('modulo workbench indisponivel');
 
@@ -477,6 +530,125 @@ adminWorkbenchRoutes.put('/settings', async (req, res) => {
       return res.status(503).json({ error: (error as Error).message });
     }
     return res.status(500).json({ error: 'Erro ao salvar configurações.' });
+  }
+});
+
+adminWorkbenchRoutes.get('/settings/integrations/evolution', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  try {
+    const settings = await workbenchStore.getSettings(tenant || undefined);
+    const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    return res.json({
+      integration: pickEvolutionIntegrationSettings(settings),
+      status,
+    });
+  } catch (error) {
+    console.error('Erro ao carregar integracao Evolution:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao carregar integracao Evolution.' });
+  }
+});
+
+adminWorkbenchRoutes.put('/settings/integrations/evolution', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
+  if (!payload) {
+    return res.status(400).json({ error: 'Payload invalido para integracao Evolution.' });
+  }
+
+  try {
+    const current = await workbenchStore.getSettings(tenant || undefined);
+    const evolutionUrl = normalizeUrlSetting(getPayloadString(payload, 'evolutionUrl'));
+    const evolutionInstance = getPayloadString(payload, 'evolutionInstance');
+    const evolutionSendPath = getPayloadString(payload, 'evolutionSendPath') || EVOLUTION_DEFAULT_SEND_PATH;
+    const nextApiKey = getPayloadString(payload, 'evolutionApiKey');
+    const nextWebhookSecret = getPayloadString(payload, 'evolutionWebhookSecret');
+    const clearApiKey = payload.clearApiKey === true;
+    const clearWebhookSecret = payload.clearWebhookSecret === true;
+
+    const currentApiKey = typeof current.evolutionApiKey === 'string' ? current.evolutionApiKey.trim() : '';
+    const currentWebhookSecret = typeof current.evolutionWebhookSecret === 'string' ? current.evolutionWebhookSecret.trim() : '';
+
+    const evolutionApiKey = clearApiKey ? '' : nextApiKey || currentApiKey;
+    const evolutionWebhookSecret = clearWebhookSecret ? '' : nextWebhookSecret || currentWebhookSecret;
+
+    if (!evolutionUrl) {
+      return res.status(400).json({ error: 'Informe uma URL valida da Evolution.' });
+    }
+
+    if (!evolutionInstance) {
+      return res.status(400).json({ error: 'Informe o nome da instancia na Evolution.' });
+    }
+
+    if (!evolutionApiKey) {
+      return res.status(400).json({ error: 'Informe a API Key da Evolution.' });
+    }
+
+    const merged: Record<string, unknown> = {
+      ...current,
+      whatsappProvider: 'evolution',
+      evolutionUrl,
+      evolutionApiKey,
+      evolutionInstance,
+      evolutionSendPath,
+      evolutionWebhookSecret,
+    };
+
+    const saved = await workbenchStore.saveSettings(merged, tenant || undefined);
+    const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
+    return res.json({
+      integration: pickEvolutionIntegrationSettings(saved),
+      status,
+    });
+  } catch (error) {
+    console.error('Erro ao salvar integracao Evolution:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao salvar integracao Evolution.' });
+  }
+});
+
+adminWorkbenchRoutes.post('/settings/integrations/evolution/test', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  try {
+    const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const current = await workbenchStore.getSettings(tenant || undefined);
+
+    const testSettings: Record<string, unknown> = {
+      ...current,
+      evolutionUrl: normalizeUrlSetting(getPayloadString(payload, 'evolutionUrl')) || current.evolutionUrl,
+      evolutionInstance: getPayloadString(payload, 'evolutionInstance') || current.evolutionInstance,
+      evolutionSendPath: getPayloadString(payload, 'evolutionSendPath') || current.evolutionSendPath || EVOLUTION_DEFAULT_SEND_PATH,
+      evolutionApiKey: getPayloadString(payload, 'evolutionApiKey') || current.evolutionApiKey,
+      evolutionWebhookSecret: getPayloadString(payload, 'evolutionWebhookSecret') || current.evolutionWebhookSecret,
+    };
+
+    const result = await testTenantEvolutionIntegration(tenant || undefined, testSettings);
+    return res.json({ result });
+  } catch (error) {
+    console.error('Erro ao testar integracao Evolution:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao testar integracao Evolution.' });
   }
 });
 

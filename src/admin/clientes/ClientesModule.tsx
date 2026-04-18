@@ -392,7 +392,7 @@ const resolveAgentDecision = ({
   const owner = requestedChannel === 'manual'
     ? 'Central de relacionamento'
     : requestedChannel === 'whatsapp'
-      ? 'Fila WhatsApp'
+      ? 'Fila Evolution'
       : 'Fila Email';
 
   return {
@@ -438,13 +438,13 @@ const buildAgentControlTower = ({
   const channelLabel = agentDraft.channel === 'manual'
     ? 'Operacao manual assistida'
     : agentDraft.channel === 'whatsapp'
-      ? 'WhatsApp como canal primario'
+      ? 'WhatsApp via Evolution'
       : 'Email como canal primario';
   const channelDetail = `${decision.priorityLabel} via ${decision.owner}. ${
     agentDraft.channel === 'manual'
       ? 'A IA prepara a rotina, mas a central valida o disparo final.'
       : agentDraft.channel === 'whatsapp'
-        ? 'Prioriza contato rapido e personalizado, com fallback de tarefa quando necessario.'
+        ? 'Prioriza contato rapido e personalizado usando a Evolution como camada oficial de envio.'
         : 'Usa mensagem mais estruturada e registra retorno em trilha operacional.'
   }`;
 
@@ -1326,7 +1326,7 @@ function ClienteModal({
                           <div>
                             <span>Envio programado</span>
                             <strong>{formatLocalDateTime(agentPreviewSendAt)}</strong>
-                            <p>Janela real em que o WhatsApp deve ser disparado.</p>
+                            <p>Janela real em que a Evolution deve disparar a mensagem.</p>
                           </div>
                           <div>
                             <span>Mensagem gerada</span>
@@ -1355,7 +1355,7 @@ function ClienteModal({
                             <label className="admin-label">Canal</label>
                             <select className="admin-input" value={agentDraft.channel} onChange={(event) => setAgentDraft((current) => ({ ...current, channel: event.target.value as ClientAgentChannel }))}>
                               <option value="manual">Manual</option>
-                              <option value="whatsapp">WhatsApp</option>
+                              <option value="whatsapp">WhatsApp via Evolution</option>
                               <option value="email">Email</option>
                             </select>
                           </div>

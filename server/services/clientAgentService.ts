@@ -1,5 +1,5 @@
 import { workbenchStore } from '../db/workbenchStore';
-import { sendWhatsappMessageToCustomer } from './whatsappService';
+import { sendEvolutionMessageToCustomer } from './evolutionIntegrationService';
 
 const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
 const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
@@ -424,7 +424,7 @@ export const runClientAgentRuleForTenant = async (
         dispatched: false,
         mode: 'skipped',
         message: 'O ciclo anterior falhou e aguarda intervencao manual.',
-        error: 'Reexecute manualmente depois de validar a conexao do WhatsApp.',
+        error: 'Reexecute manualmente depois de validar a integracao Evolution.',
       },
     };
   }
@@ -473,7 +473,7 @@ export const runClientAgentRuleForTenant = async (
     }
 
     try {
-      const providerMessageId = await sendWhatsappMessageToCustomer(clientPhone, preview);
+      const providerMessageId = await sendEvolutionMessageToCustomer(tenantSlug, clientPhone, preview);
       const sentEvent: ClientAgentEvent = {
         id: buildCycleEventId(),
         ruleId: rule.id,
@@ -496,7 +496,7 @@ export const runClientAgentRuleForTenant = async (
       outcome = {
         dispatched: true,
         mode: 'whatsapp',
-        message: 'Mensagem enviada no WhatsApp do cliente.',
+        message: 'Mensagem enviada ao cliente pela Evolution API.',
         error: null,
       };
     } catch (error) {
@@ -512,7 +512,7 @@ export const runClientAgentRuleForTenant = async (
         createdAt: nowIso,
         taskId: null,
         status: 'failed',
-        reason: error instanceof Error ? error.message : 'Falha ao enviar no WhatsApp.',
+        reason: error instanceof Error ? error.message : 'Falha ao enviar pela Evolution API.',
         sentAt: null,
         providerMessageId: null,
       };

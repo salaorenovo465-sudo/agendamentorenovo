@@ -5,7 +5,6 @@ export type TabId =
   | 'agenda'
   | 'disponibilidade'
   | 'clientes'
-  | 'whatsapp'
   | 'servicos'
   | 'profissionais'
   | 'analytics'

@@ -1,8 +1,86 @@
-import { useState, type Dispatch, type SetStateAction } from 'react';
-import { toStringValue, normalizeTenantSlug } from '../AdminUtils';
-import type { AdminSettings, AdminTenant } from '../types';
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  BadgeCheck,
+  Building2,
+  KeyRound,
+  Link2,
+  PlugZap,
+  QrCode,
+  RadioTower,
+  Settings2,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
+
+import { normalizeTenantSlug, toStringValue } from '../AdminUtils';
+import {
+  createEvolutionInstanceForAdmin,
+  getEvolutionInstanceQrForAdmin,
+  getEvolutionIntegrationForAdmin,
+  refreshEvolutionInstanceQrForAdmin,
+  saveEvolutionIntegrationForAdmin,
+  testEvolutionIntegrationForAdmin,
+} from '../api/integrationApi';
+import type {
+  AdminEvolutionIntegrationState,
+  AdminEvolutionIntegrationTestResult,
+  AdminSettings,
+  AdminTenant,
+} from '../types';
+
+type SettingsSection = 'geral' | 'integracoes' | 'seguranca';
+
+type EvolutionFormState = {
+  evolutionUrl: string;
+  evolutionInstance: string;
+  evolutionSendPath: string;
+  evolutionApiKey: string;
+  evolutionWebhookSecret: string;
+};
+
+const DEFAULT_EVOLUTION_SEND_PATH = '/message/sendText/{instance}';
+
+const SETTINGS_SECTIONS: Array<{
+  id: SettingsSection;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'geral',
+    label: 'Geral',
+    description: 'Dados da empresa e operacao base.',
+  },
+  {
+    id: 'integracoes',
+    label: 'Integracoes',
+    description: 'Cards com conexao pratica e status vivo.',
+  },
+  {
+    id: 'seguranca',
+    label: 'Seguranca',
+    description: 'Senha master e blindagem interna.',
+  },
+];
+
+const buildEmptyEvolutionForm = (): EvolutionFormState => ({
+  evolutionUrl: '',
+  evolutionInstance: '',
+  evolutionSendPath: DEFAULT_EVOLUTION_SEND_PATH,
+  evolutionApiKey: '',
+  evolutionWebhookSecret: '',
+});
+
+const humanizeConnectionState = (value: string): string => {
+  if (value === 'open') return 'Conectada';
+  if (value === 'connecting') return 'Conectando';
+  if (value === 'close') return 'Fechada';
+  if (value === 'disconnected') return 'Desconectada';
+  if (value === 'missing') return 'Nao criada';
+  return 'Indefinida';
+};
 
 export function ConfiguracoesTab({
+  adminKey,
   activeTenant,
   settings,
   setSettings,
@@ -18,6 +96,7 @@ export function ConfiguracoesTab({
   onToggleTenantActive,
   onUpdateMasterPassword,
 }: {
+  adminKey: string;
   activeTenant: string;
   settings: AdminSettings;
   setSettings: Dispatch<SetStateAction<AdminSettings>>;
@@ -33,12 +112,85 @@ export function ConfiguracoesTab({
   onToggleTenantActive: (tenant: AdminTenant) => void;
   onUpdateMasterPassword: (currentPassword: string, newPassword: string) => Promise<boolean>;
 }) {
+  const [activeSection, setActiveSection] = useState<SettingsSection>('geral');
   const [currentMasterPassword, setCurrentMasterPassword] = useState('');
   const [newMasterPassword, setNewMasterPassword] = useState('');
   const [confirmMasterPassword, setConfirmMasterPassword] = useState('');
   const [masterPasswordSaving, setMasterPasswordSaving] = useState(false);
   const [masterPasswordError, setMasterPasswordError] = useState('');
   const [masterPasswordSuccess, setMasterPasswordSuccess] = useState('');
+
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationSaving, setIntegrationSaving] = useState(false);
+  const [integrationTesting, setIntegrationTesting] = useState(false);
+  const [integrationAction, setIntegrationAction] = useState<'create' | 'qr' | 'refresh' | null>(null);
+  const [integrationPanelOpen, setIntegrationPanelOpen] = useState(false);
+  const [integrationError, setIntegrationError] = useState('');
+  const [integrationSuccess, setIntegrationSuccess] = useState('');
+  const [integrationState, setIntegrationState] = useState<AdminEvolutionIntegrationState | null>(null);
+  const [integrationTestResult, setIntegrationTestResult] = useState<AdminEvolutionIntegrationTestResult | null>(null);
+  const [evolutionForm, setEvolutionForm] = useState<EvolutionFormState>(() => buildEmptyEvolutionForm());
+
+  const companyName = useMemo(() => {
+    const value = typeof settings.companyName === 'string' ? settings.companyName.trim() : '';
+    return value || tenants.find((tenant) => tenant.slug === activeTenant)?.name || 'Empresa';
+  }, [activeTenant, settings.companyName, tenants]);
+
+  const integrationConfigured = integrationState?.integration.configured === true;
+  const integrationConnected = integrationState?.status.connected === true;
+  const integrationBadge = integrationConnected
+    ? 'Integrado'
+    : integrationConfigured
+      ? 'Configurado'
+      : 'Nao conectado';
+  const integrationActionLabel = integrationConnected
+    ? 'Gerenciar'
+    : integrationConfigured
+      ? 'Finalizar conexao'
+      : 'Conectar';
+
+  const syncEvolutionForm = (payload: AdminEvolutionIntegrationState) => {
+    setEvolutionForm({
+      evolutionUrl: payload.integration.evolutionUrl || '',
+      evolutionInstance: payload.integration.evolutionInstance || '',
+      evolutionSendPath: payload.integration.evolutionSendPath || DEFAULT_EVOLUTION_SEND_PATH,
+      evolutionApiKey: '',
+      evolutionWebhookSecret: '',
+    });
+  };
+
+  const loadEvolutionIntegration = async () => {
+    setIntegrationLoading(true);
+    setIntegrationError('');
+
+    try {
+      const payload = await getEvolutionIntegrationForAdmin(adminKey, activeTenant);
+      setIntegrationState(payload);
+      syncEvolutionForm(payload);
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Erro ao carregar integracao Evolution.');
+    } finally {
+      setIntegrationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    setIntegrationPanelOpen(false);
+    setIntegrationError('');
+    setIntegrationSuccess('');
+    setIntegrationTestResult(null);
+    setIntegrationState(null);
+    setEvolutionForm(buildEmptyEvolutionForm());
+  }, [activeTenant]);
+
+  useEffect(() => {
+    if (activeSection !== 'integracoes') {
+      return;
+    }
+
+    void loadEvolutionIntegration();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSection, activeTenant]);
 
   const handleMasterPasswordUpdate = async () => {
     setMasterPasswordError('');
@@ -78,18 +230,157 @@ export function ConfiguracoesTab({
     setMasterPasswordSuccess('Senha master redefinida. As abas protegidas vao exigir a nova senha.');
   };
 
-  return (
-    <div className="admin-analytics-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', margin: 0 }}>Configuracoes gerais</h3>
+  const handleOpenEvolutionPanel = async () => {
+    setActiveSection('integracoes');
+    setIntegrationPanelOpen(true);
+
+    if (!integrationState && !integrationLoading) {
+      await loadEvolutionIntegration();
+    }
+  };
+
+  const handleSaveEvolutionIntegration = async () => {
+    setIntegrationError('');
+    setIntegrationSuccess('');
+    setIntegrationTestResult(null);
+
+    setIntegrationSaving(true);
+    try {
+      const payload = await saveEvolutionIntegrationForAdmin(
+        {
+          evolutionUrl: evolutionForm.evolutionUrl.trim(),
+          evolutionInstance: evolutionForm.evolutionInstance.trim(),
+          evolutionSendPath: evolutionForm.evolutionSendPath.trim() || DEFAULT_EVOLUTION_SEND_PATH,
+          evolutionApiKey: evolutionForm.evolutionApiKey.trim() || undefined,
+          evolutionWebhookSecret: evolutionForm.evolutionWebhookSecret.trim() || undefined,
+        },
+        adminKey,
+        activeTenant,
+      );
+
+      setIntegrationState(payload);
+      syncEvolutionForm(payload);
+      setSettings((current) => ({
+        ...current,
+        whatsappProvider: 'evolution',
+        evolutionUrl: payload.integration.evolutionUrl,
+        evolutionInstance: payload.integration.evolutionInstance,
+        evolutionSendPath: payload.integration.evolutionSendPath,
+      }));
+      setIntegrationSuccess(
+        payload.status.connected
+          ? 'Evolution integrada com sucesso. O canal do agente ja esta pronto.'
+          : 'Credenciais salvas. Agora finalize o vinculo da instancia para deixar o canal operacional.',
+      );
+      setIntegrationPanelOpen(true);
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Erro ao salvar integracao Evolution.');
+    } finally {
+      setIntegrationSaving(false);
+    }
+  };
+
+  const handleTestEvolutionIntegration = async () => {
+    setIntegrationTesting(true);
+    setIntegrationError('');
+    setIntegrationSuccess('');
+
+    try {
+      const result = await testEvolutionIntegrationForAdmin(
+        adminKey,
+        {
+          evolutionUrl: evolutionForm.evolutionUrl.trim(),
+          evolutionInstance: evolutionForm.evolutionInstance.trim(),
+          evolutionSendPath: evolutionForm.evolutionSendPath.trim() || DEFAULT_EVOLUTION_SEND_PATH,
+          evolutionApiKey: evolutionForm.evolutionApiKey.trim() || undefined,
+          evolutionWebhookSecret: evolutionForm.evolutionWebhookSecret.trim() || undefined,
+        },
+        activeTenant,
+      );
+      setIntegrationTestResult(result);
+      if (result.ok) {
+        setIntegrationSuccess('A Evolution respondeu e a instancia configurada foi localizada.');
+      } else {
+        setIntegrationError(result.error || 'A Evolution respondeu, mas a configuracao ainda nao ficou valida.');
+      }
+      await loadEvolutionIntegration();
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Erro ao testar integracao Evolution.');
+    } finally {
+      setIntegrationTesting(false);
+    }
+  };
+
+  const runEvolutionInstanceAction = async (
+    action: 'create' | 'qr' | 'refresh',
+  ) => {
+    setIntegrationAction(action);
+    setIntegrationError('');
+    setIntegrationSuccess('');
+
+    try {
+      const payload = action === 'create'
+        ? await createEvolutionInstanceForAdmin(adminKey, activeTenant, companyName)
+        : action === 'qr'
+          ? await getEvolutionInstanceQrForAdmin(adminKey, activeTenant)
+          : await refreshEvolutionInstanceQrForAdmin(adminKey, activeTenant);
+
+      setIntegrationState((current) =>
+        current
+          ? { ...current, status: payload }
+          : {
+              integration: {
+                provider: 'evolution',
+                configured: payload.configured,
+                evolutionUrl: evolutionForm.evolutionUrl.trim(),
+                evolutionInstance: payload.instanceName,
+                evolutionSendPath: evolutionForm.evolutionSendPath.trim() || DEFAULT_EVOLUTION_SEND_PATH,
+                hasApiKey: Boolean(evolutionForm.evolutionApiKey.trim()),
+                apiKeyPreview: null,
+                hasWebhookSecret: Boolean(evolutionForm.evolutionWebhookSecret.trim()),
+                webhookSecretPreview: null,
+              },
+              status: payload,
+            },
+      );
+
+      setIntegrationSuccess(
+        action === 'create'
+          ? 'Instancia criada na Evolution. Agora escaneie o QR para concluir o vinculo.'
+          : action === 'qr'
+            ? 'QR carregado. Vincule o numero dentro da sua conta Evolution.'
+            : 'QR atualizado com sucesso.',
+      );
+      setIntegrationPanelOpen(true);
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : 'Erro ao operar a instancia Evolution.');
+    } finally {
+      setIntegrationAction(null);
+    }
+  };
+
+  const renderGeneralSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="settings-hero-card">
+        <div>
+          <span className="settings-section-kicker">Base operacional</span>
+          <h3>Configuracoes gerais</h3>
+          <p>Dados estruturais da empresa ativa. Tudo salvo por tenant.</p>
+        </div>
+        <div className="settings-hero-chip">
+          <Building2 style={{ width: 16, height: 16 }} />
+          <span>{activeTenant}</span>
+        </div>
+      </div>
 
       <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
-        <div style={{ padding: 14, borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)' }}>
+        <div className="settings-surface-card">
           <p className="admin-label">Tenant ativo</p>
           <p style={{ fontSize: 13, color: 'var(--admin-text)', margin: '4px 0 0' }}><span style={{ fontWeight: 600 }}>Slug:</span> {activeTenant}</p>
-          <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0 0' }}>Ajustes desta tela serão salvos apenas para esta empresa.</p>
+          <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0 0' }}>Ajustes desta tela serao salvos apenas para esta empresa.</p>
         </div>
 
-        <div style={{ padding: 14, borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)' }}>
+        <div className="settings-surface-card">
           <p className="admin-label">Criar nova empresa</p>
           <div style={{ display: 'grid', gap: 8, gridTemplateColumns: '1fr 1fr auto' }}>
             <input className="admin-input-sm" value={newTenantName} onChange={(event) => setNewTenantName(event.target.value)} placeholder="Nome da empresa" />
@@ -102,7 +393,7 @@ export function ConfiguracoesTab({
       </div>
 
       {tenants.length > 0 && (
-        <div style={{ padding: 14, borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)' }}>
+        <div className="settings-surface-card">
           <p className="admin-label">Empresas cadastradas</p>
           <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {tenants.map((tenant) => (
@@ -127,6 +418,243 @@ export function ConfiguracoesTab({
         <div><label className="admin-label">Politica de cancelamento</label><input className="admin-input" value={toStringValue(settings.cancelPolicy)} onChange={(event) => setSettings((current) => ({ ...current, cancelPolicy: event.target.value }))} /></div>
         <div><label className="admin-label">Inicio atendimento WhatsApp</label><input type="time" className="admin-input" value={toStringValue(settings.whatsappOpenTime)} onChange={(event) => setSettings((current) => ({ ...current, whatsappOpenTime: event.target.value }))} /></div>
         <div><label className="admin-label">Fim atendimento WhatsApp</label><input type="time" className="admin-input" value={toStringValue(settings.whatsappCloseTime)} onChange={(event) => setSettings((current) => ({ ...current, whatsappCloseTime: event.target.value }))} /></div>
+      </div>
+
+      <button disabled={savingSettings} onClick={onSaveSettings} className="admin-btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 24px' }}>
+        {savingSettings ? 'Salvando...' : 'Salvar configuracoes'}
+      </button>
+    </div>
+  );
+
+  const renderIntegrationSection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="settings-hero-card">
+        <div>
+          <span className="settings-section-kicker">Marketplace interno</span>
+          <h3>Integracoes</h3>
+          <p>Cards com status vivo, CTA direto e fluxo de conexao no padrao de SaaS moderno.</p>
+        </div>
+        <div className="settings-hero-chip">
+          <Sparkles style={{ width: 16, height: 16 }} />
+          <span>Evolution only</span>
+        </div>
+      </div>
+
+      <div className="settings-integrations-grid">
+        <div className={`settings-integration-card ${integrationConnected ? 'connected' : integrationConfigured ? 'configured' : ''}`}>
+          <div className="settings-integration-card-top">
+            <div className="settings-integration-brand evolution">
+              <span>EV</span>
+            </div>
+            <div className="settings-integration-copy">
+              <span className="settings-integration-kicker">Canal do agente</span>
+              <h4>Evolution API</h4>
+              <p>Envio direto das mensagens operacionais do agente de clientes usando qualquer conta da sua Evolution.</p>
+            </div>
+            <span className={`settings-integration-badge ${integrationConnected ? 'ok' : integrationConfigured ? 'warn' : ''}`}>{integrationBadge}</span>
+          </div>
+
+          <div className="settings-integration-metrics">
+            <div>
+              <span>API</span>
+              <strong>{integrationConfigured ? 'Configurada' : 'Pendente'}</strong>
+            </div>
+            <div>
+              <span>Instancia</span>
+              <strong>{integrationState?.status.instanceName || 'Nao definida'}</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong>{integrationState ? humanizeConnectionState(integrationState.status.connectionState) : 'Carregando'}</strong>
+            </div>
+          </div>
+
+          <div className="settings-integration-footer">
+            <p>
+              {integrationConnected
+                ? 'A conta ja esta pronta para o agente executar disparos reais.'
+                : 'Clique em conectar para cadastrar as credenciais e concluir o vinculo da instancia.'}
+            </p>
+            <button
+              className={integrationConnected ? 'admin-btn-outline' : 'admin-btn-primary'}
+              onClick={() => void handleOpenEvolutionPanel()}
+              disabled={integrationLoading}
+            >
+              {integrationLoading ? 'Carregando...' : integrationActionLabel}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {integrationError && <p className="settings-inline-error">{integrationError}</p>}
+      {integrationSuccess && <p className="settings-inline-success">{integrationSuccess}</p>}
+
+      {(integrationPanelOpen || integrationConnected || integrationConfigured) && (
+        <div className="settings-integration-console">
+          <div className="settings-integration-console-header">
+            <div>
+              <span className="settings-section-kicker">Painel de conexao</span>
+              <h4>Evolution API</h4>
+              <p>Configure credenciais, valide a conta e conclua o vinculo da instancia no mesmo painel.</p>
+            </div>
+            <button className="admin-btn-outline" onClick={() => setIntegrationPanelOpen((current) => !current)}>
+              {integrationPanelOpen ? 'Recolher' : 'Expandir'}
+            </button>
+          </div>
+
+          {integrationPanelOpen && (
+            <>
+              <div className="settings-integration-status-grid">
+                <div className="settings-status-card">
+                  <Link2 style={{ width: 16, height: 16 }} />
+                  <div>
+                    <span>Conexao API</span>
+                    <strong>{integrationConfigured ? 'Mapeada' : 'Sem credencial'}</strong>
+                  </div>
+                </div>
+                <div className="settings-status-card">
+                  <RadioTower style={{ width: 16, height: 16 }} />
+                  <div>
+                    <span>Estado da instancia</span>
+                    <strong>{integrationState ? humanizeConnectionState(integrationState.status.connectionState) : 'Indefinida'}</strong>
+                  </div>
+                </div>
+                <div className="settings-status-card">
+                  <BadgeCheck style={{ width: 16, height: 16 }} />
+                  <div>
+                    <span>Modo do agente</span>
+                    <strong>Evolution exclusiva</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))' }}>
+                <div>
+                  <label className="admin-label">URL da Evolution</label>
+                  <input
+                    className="admin-input"
+                    value={evolutionForm.evolutionUrl}
+                    onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionUrl: event.target.value }))}
+                    placeholder="https://sua-evolution.exemplo.com"
+                  />
+                </div>
+                <div>
+                  <label className="admin-label">Nome da instancia</label>
+                  <input
+                    className="admin-input"
+                    value={evolutionForm.evolutionInstance}
+                    onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionInstance: event.target.value }))}
+                    placeholder="renovo-salao"
+                  />
+                </div>
+                <div>
+                  <label className="admin-label">Send Path</label>
+                  <input
+                    className="admin-input"
+                    value={evolutionForm.evolutionSendPath}
+                    onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionSendPath: event.target.value }))}
+                    placeholder={DEFAULT_EVOLUTION_SEND_PATH}
+                  />
+                </div>
+                <div>
+                  <label className="admin-label">Webhook Secret</label>
+                  <input
+                    className="admin-input"
+                    value={evolutionForm.evolutionWebhookSecret}
+                    onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionWebhookSecret: event.target.value }))}
+                    placeholder={integrationState?.integration.hasWebhookSecret ? `Ja cadastrado: ${integrationState.integration.webhookSecretPreview}` : 'Opcional'}
+                  />
+                  <small className="settings-field-help">
+                    {integrationState?.integration.hasWebhookSecret ? 'Deixe vazio para manter o secret atual.' : 'Opcional para validacao futura de webhooks.'}
+                  </small>
+                </div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <label className="admin-label">API Key</label>
+                  <div className="settings-secret-input">
+                    <KeyRound style={{ width: 15, height: 15, color: 'var(--admin-text-muted)' }} />
+                    <input
+                      className="admin-input"
+                      value={evolutionForm.evolutionApiKey}
+                      onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionApiKey: event.target.value }))}
+                      placeholder={integrationState?.integration.hasApiKey ? `Ja cadastrada: ${integrationState.integration.apiKeyPreview}` : 'Cole aqui a API Key da Evolution'}
+                    />
+                  </div>
+                  <small className="settings-field-help">
+                    {integrationState?.integration.hasApiKey ? 'Deixe vazio para preservar a API Key atual.' : 'A API Key fica salva no tenant e nao volta aberta para a tela.'}
+                  </small>
+                </div>
+              </div>
+
+              <div className="settings-integration-actions">
+                <button className="admin-btn-primary" onClick={() => void handleSaveEvolutionIntegration()} disabled={integrationSaving}>
+                  {integrationSaving ? 'Salvando...' : 'Salvar integracao'}
+                </button>
+                <button className="admin-btn-outline" onClick={() => void handleTestEvolutionIntegration()} disabled={integrationTesting || integrationSaving}>
+                  {integrationTesting ? 'Testando...' : 'Testar conexao'}
+                </button>
+                <button className="admin-btn-outline" onClick={() => void runEvolutionInstanceAction('create')} disabled={integrationAction !== null || integrationSaving}>
+                  {integrationAction === 'create' ? 'Criando...' : 'Criar instancia'}
+                </button>
+                <button className="admin-btn-outline" onClick={() => void runEvolutionInstanceAction('qr')} disabled={integrationAction !== null || integrationSaving}>
+                  {integrationAction === 'qr' ? 'Gerando...' : 'Gerar QR'}
+                </button>
+                <button className="admin-btn-outline" onClick={() => void runEvolutionInstanceAction('refresh')} disabled={integrationAction !== null || integrationSaving}>
+                  {integrationAction === 'refresh' ? 'Atualizando...' : 'Atualizar QR'}
+                </button>
+              </div>
+
+              {integrationTestResult && (
+                <div className={`settings-test-result ${integrationTestResult.ok ? 'ok' : 'warn'}`}>
+                  <strong>{integrationTestResult.ok ? 'Teste concluido' : 'Teste parcial'}</strong>
+                  <span>
+                    API acessivel: {integrationTestResult.reachable ? 'sim' : 'nao'} | instancia encontrada: {integrationTestResult.instanceFound ? 'sim' : 'nao'} | instancias lidas: {integrationTestResult.instancesCount}
+                  </span>
+                </div>
+              )}
+
+              {integrationState?.status.lastError && (
+                <div className="settings-test-result warn">
+                  <strong>Ultimo retorno da Evolution</strong>
+                  <span>{integrationState.status.lastError}</span>
+                </div>
+              )}
+
+              {integrationState?.status.qrDataUrl ? (
+                <div className="settings-qr-shell">
+                  <div className="settings-qr-copy">
+                    <span className="settings-section-kicker">Vinculo da instancia</span>
+                    <h5>QR Code da Evolution</h5>
+                    <p>Escaneie o QR dentro do fluxo da sua conta Evolution para concluir o canal deste tenant.</p>
+                  </div>
+                  <div className="settings-qr-frame">
+                    <img src={integrationState.status.qrDataUrl} alt="QR Code Evolution" />
+                  </div>
+                </div>
+              ) : (
+                <div className="settings-empty-qr">
+                  <QrCode style={{ width: 18, height: 18 }} />
+                  <span>Quando o QR estiver disponivel, ele aparece aqui no mesmo painel.</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderSecuritySection = () => (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <div className="settings-hero-card">
+        <div>
+          <span className="settings-section-kicker">Blindagem</span>
+          <h3>Seguranca interna</h3>
+          <p>Controle a senha master que libera areas protegidas e operacoes sensiveis do painel.</p>
+        </div>
+        <div className="settings-hero-chip">
+          <ShieldCheck style={{ width: 16, height: 16 }} />
+          <span>Master lock</span>
+        </div>
       </div>
 
       <div className="settings-master-password-panel">
@@ -191,14 +719,41 @@ export function ConfiguracoesTab({
           </button>
         </div>
       </div>
+    </div>
+  );
 
-      <div style={{ padding: '10px 14px', borderRadius: 'var(--admin-radius-xs)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)', fontSize: 12, color: 'var(--admin-text-muted)' }}>
-        As integrações sensíveis (Evolution e Chatwoot) são gerenciadas somente no backend e não aparecem nesta tela.
+  return (
+    <div className="admin-analytics-card" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <div className="settings-header">
+        <div>
+          <span className="settings-section-kicker">Central administrativa</span>
+          <h2>Configuracoes da operacao</h2>
+          <p>Organizacao por seccao, integracao em cards e ajustes persistidos por empresa ativa.</p>
+        </div>
       </div>
 
-      <button disabled={savingSettings} onClick={onSaveSettings} className="admin-btn-primary" style={{ alignSelf: 'flex-start', padding: '10px 24px' }}>
-        {savingSettings ? 'Salvando...' : 'Salvar configuracoes'}
-      </button>
+      <div className="settings-section-tabs">
+        {SETTINGS_SECTIONS.map((section) => (
+          <button
+            key={section.id}
+            type="button"
+            className={`settings-section-tab ${activeSection === section.id ? 'active' : ''}`}
+            onClick={() => setActiveSection(section.id)}
+          >
+            <span className="settings-section-tab-icon">
+              {section.id === 'geral' ? <Settings2 style={{ width: 15, height: 15 }} /> : section.id === 'integracoes' ? <PlugZap style={{ width: 15, height: 15 }} /> : <ShieldCheck style={{ width: 15, height: 15 }} />}
+            </span>
+            <span>
+              <strong>{section.label}</strong>
+              <small>{section.description}</small>
+            </span>
+          </button>
+        ))}
+      </div>
+
+      {activeSection === 'geral' && renderGeneralSection()}
+      {activeSection === 'integracoes' && renderIntegrationSection()}
+      {activeSection === 'seguranca' && renderSecuritySection()}
     </div>
   );
 }

@@ -11,7 +11,6 @@ import {
   Lock,
   LogOut,
   Menu,
-  MessageSquare,
   RefreshCw,
   Settings2,
   Sparkles,
@@ -50,7 +49,6 @@ import {
 } from './api';
 import { toast, ToastContainer, RejectModal, useKeyboardShortcuts, triggerConfetti } from './AdminHelpers';
 import PaymentConfirmationTab from './PaymentConfirmationTab';
-import WhatsAppWorkspace from './WhatsAppWorkspace';
 import type { AdminBooking, AdminCreateBookingPayload, AdminSettings, AdminTenant, WorkbenchEntity, WorkbenchOverview } from './types';
 import { services as publicServicesOriginal } from '../data/services';
 
@@ -78,7 +76,6 @@ import { AnalyticsTab } from './tabs/AnalyticsTab';
 import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 import type { ServiceCatalogCategory, ServiceCatalogItem } from './collaboratorUtils';
 
-const WHATSAPP_WORKSPACE_ENABLED = import.meta.env.VITE_WHATSAPP_WORKSPACE_ENABLED === 'true';
 const ClientesModule = lazy(() => import('./clientes/ClientesModule'));
 
 const cloneServiceCatalog = (catalog: ServiceCatalogCategory[]): ServiceCatalogCategory[] =>
@@ -246,7 +243,6 @@ export default function AdminApp() {
     () => [
       { id: 'dashboard' as TabId, label: 'Dashboard', icon: LayoutDashboard },
       { id: 'agenda' as TabId, label: 'Agenda', icon: Calendar },
-      ...(WHATSAPP_WORKSPACE_ENABLED ? [{ id: 'whatsapp' as TabId, label: 'WhatsApp', icon: MessageSquare }] : []),
       { id: 'clientes' as TabId, label: 'Clientes', icon: Users },
       { id: 'servicos' as TabId, label: 'Servicos', icon: Sparkles },
       { id: 'profissionais' as TabId, label: 'Colaboradores', icon: UserCircle2 },
@@ -262,7 +258,6 @@ export default function AdminApp() {
 
   const protectedTabs = useMemo<Partial<Record<TabId, string>>>(() => ({
     dashboard: 'Dashboard',
-    whatsapp: 'WhatsApp',
     analytics: 'Analytics',
     pagamentos: 'Pagamentos',
     profissionais: 'Colaboradores',
@@ -1266,10 +1261,6 @@ export default function AdminApp() {
             />
           )}
 
-          {WHATSAPP_WORKSPACE_ENABLED && activeTab === 'whatsapp' && (
-            <WhatsAppWorkspace adminKey={adminKey} settings={settings} tenantSlug={activeTenant} />
-          )}
-
           {activeTab === 'analytics' && (
             <AnalyticsTab
               bookings={bookings}
@@ -1285,6 +1276,7 @@ export default function AdminApp() {
 
           {activeTab === 'configuracoes' && (
             <ConfiguracoesTab
+              adminKey={adminKey}
               activeTenant={activeTenant}
               settings={settings}
               setSettings={setSettings}
