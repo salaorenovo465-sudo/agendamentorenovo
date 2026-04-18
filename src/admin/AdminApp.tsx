@@ -1,6 +1,8 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'motion/react';
 import './admin.css';
 import {
+  ArrowRight,
   BarChart3,
   Bell,
   Calendar,
@@ -13,6 +15,7 @@ import {
   Menu,
   RefreshCw,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Stethoscope,
   UserCircle2,
@@ -1054,32 +1057,101 @@ export default function AdminApp() {
         <div className="admin-orb admin-orb-1" />
         <div className="admin-orb admin-orb-2" />
         <div className="admin-orb admin-orb-3" />
-        <div className="admin-login-card">
-          <div className="admin-login-accent" />
-          <div style={{ padding: '36px 32px 32px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 24 }}>
-              <div className="admin-login-icon-ring">
-                <Stethoscope style={{ width: 28, height: 28, color: '#d4af37' }} />
-              </div>
+        <div className="admin-login-grid">
+          <motion.section
+            className="admin-login-hero"
+            initial={{ opacity: 0, x: -26 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="admin-login-brandline">
+              <span className="admin-login-brand-mark">
+                <Stethoscope style={{ width: 26, height: 26 }} />
+              </span>
               <div>
-                <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.03em' }}>Estúdio Renovo</h1>
-                <p style={{ fontSize: 12, color: 'var(--admin-text-muted)', margin: '2px 0 0', fontWeight: 500 }}>Painel administrativo</p>
+                <strong>Estudio Renovo</strong>
+                <small>Central de agendamento inteligente</small>
               </div>
             </div>
-            <label className="admin-label">Chave administrativa</label>
-            <input
-              type="password"
-              value={adminKeyInput}
-              onChange={(event) => setAdminKeyInput(event.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
-              className="admin-input"
-              placeholder="Digite sua chave de acesso"
-            />
-            <button onClick={handleLogin} className="admin-btn-primary" style={{ width: '100%', marginTop: 20, padding: '12px 20px' }}>
-              Entrar no painel
-            </button>
-            {error && <p style={{ marginTop: 14, fontSize: 13, color: '#fb7185', fontWeight: 500 }}>{error}</p>}
-          </div>
+
+            <span className="admin-login-eyebrow">
+              <Sparkles style={{ width: 15, height: 15 }} />
+              Salao, agenda e relacionamento em um unico cockpit
+            </span>
+            <h1>Seja bem-vindo a Central de Agendamento Renovo.</h1>
+            <p>
+              Entre no painel para comandar agenda, clientes, recorrencias, pagamentos e integracoes
+              com uma experiencia visual clara, segura e preparada para operacao diaria.
+            </p>
+
+            <div className="admin-login-highlights">
+              <article>
+                <Calendar style={{ width: 18, height: 18 }} />
+                <strong>Agenda viva</strong>
+                <span>Confirmacoes, remarcacoes e alertas em tempo real.</span>
+              </article>
+              <article>
+                <Users style={{ width: 18, height: 18 }} />
+                <strong>Clientes 360</strong>
+                <span>Historico, retorno e relacionamento recorrente.</span>
+              </article>
+              <article>
+                <ShieldCheck style={{ width: 18, height: 18 }} />
+                <strong>Acesso protegido</strong>
+                <span>Central bloqueada por chave administrativa.</span>
+              </article>
+            </div>
+          </motion.section>
+
+          <motion.section
+            className="admin-login-panel"
+            initial={{ opacity: 0, y: 32, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            transition={{ duration: 0.72, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
+          >
+            <div className="admin-login-panel-glow" />
+            <div className="admin-login-card">
+              <div className="admin-login-accent" />
+              <div className="admin-login-card-inner">
+                <div className="admin-login-card-head">
+                  <div className="admin-login-icon-ring">
+                    <Lock style={{ width: 26, height: 26 }} />
+                  </div>
+                  <div>
+                    <span>Acesso administrativo</span>
+                    <h2>Entrar na Central Renovo</h2>
+                    <p>Use sua chave para liberar o painel operacional.</p>
+                  </div>
+                </div>
+
+                <div className="admin-login-form">
+                  <label className="admin-label" htmlFor="admin-access-key">Chave administrativa</label>
+                  <div className="admin-login-input-wrap">
+                    <Lock style={{ width: 16, height: 16 }} />
+                    <input
+                      id="admin-access-key"
+                      type="password"
+                      value={adminKeyInput}
+                      onChange={(event) => setAdminKeyInput(event.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                      className="admin-input admin-login-input"
+                      placeholder="Digite sua chave de acesso"
+                    />
+                  </div>
+                  <button onClick={handleLogin} className="admin-btn-primary admin-login-submit">
+                    Entrar no painel
+                    <ArrowRight style={{ width: 17, height: 17 }} />
+                  </button>
+                  {error && <p className="admin-login-error">{error}</p>}
+                </div>
+
+                <div className="admin-login-trust-row">
+                  <span><ShieldCheck style={{ width: 14, height: 14 }} /> Sessao local protegida</span>
+                  <span><Clock style={{ width: 14, height: 14 }} /> Operacao em tempo real</span>
+                </div>
+              </div>
+            </div>
+          </motion.section>
         </div>
       </div>
     );
