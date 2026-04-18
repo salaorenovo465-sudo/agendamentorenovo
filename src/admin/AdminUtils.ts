@@ -51,6 +51,40 @@ export const toStringValue = (value: unknown): string => {
   return '';
 };
 
+export const normalizePhoneDigits = (value: string): string => value.replace(/\D/g, '');
+
+export const formatBrazilWhatsappInput = (value: string): string => {
+  const digits = normalizePhoneDigits(value);
+  const withoutCountry = digits.startsWith('55') ? digits.slice(2) : digits;
+  const limited = withoutCountry.slice(0, 11);
+  const ddd = limited.slice(0, 2);
+  const number = limited.slice(2);
+
+  let formatted = '+55';
+  if (!ddd) {
+    return formatted;
+  }
+
+  formatted += ` (${ddd}`;
+  if (ddd.length === 2) {
+    formatted += ')';
+  }
+
+  if (!number) {
+    return formatted;
+  }
+
+  if (number.length <= 4) {
+    return `${formatted} ${number}`;
+  }
+
+  if (number.length <= 8) {
+    return `${formatted} ${number.slice(0, 4)}-${number.slice(4)}`;
+  }
+
+  return `${formatted} ${number.slice(0, 5)}-${number.slice(5, 9)}`;
+};
+
 export const defaultOverview: WorkbenchOverview = {
   date: getTodayDate(),
   bookingStats: { total: 0, pending: 0, confirmed: 0, rejected: 0 },

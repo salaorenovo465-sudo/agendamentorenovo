@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 
 import '../../loadEnv';
 import { bookingStore } from '../bookingStore';
+import { normalizeWhatsappPhoneWithPlus } from '../../utils/phone';
 
 import type { WorkbenchEntity, OverviewData, TenantRecord } from './workbenchTypes';
 import { ENTITY_CONFIG } from './workbenchTypes';
@@ -101,6 +102,11 @@ class WorkbenchStore {
 
     if (Object.prototype.hasOwnProperty.call(sanitized, 'active')) {
       sanitized.active = Boolean(sanitized.active);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(sanitized, 'phone')) {
+      const normalizedPhone = normalizeWhatsappPhoneWithPlus(String(sanitized.phone || ''));
+      sanitized.phone = normalizedPhone || String(sanitized.phone || '').trim();
     }
 
     if (Object.prototype.hasOwnProperty.call(sanitized, 'commission_profile') && !Array.isArray(sanitized.commission_profile)) {

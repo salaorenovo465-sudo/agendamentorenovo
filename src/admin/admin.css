@@ -960,6 +960,8 @@
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
   box-shadow: 0 12px 28px -26px rgba(58,10,30,0.6);
+  display: grid;
+  gap: 10px;
   transition: transform var(--admin-transition), border-color var(--admin-transition), box-shadow var(--admin-transition);
 }
 .agenda-booking-card:hover {
@@ -983,10 +985,14 @@
   display: flex;
   align-items: center;
 }
+.agenda-booking-static,
+.agenda-booking-hover-panel {
+  display: grid;
+  gap: 10px;
+}
 .agenda-card-topline {
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
 }
 .agenda-status-pill {
   display: inline-flex;
@@ -1033,9 +1039,8 @@
 .agenda-client-copy p,
 .agenda-client-copy span {
   display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .agenda-client-copy p {
   margin: 0;
@@ -1051,9 +1056,8 @@
 }
 .agenda-card-meta-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  margin-top: 12px;
 }
 .agenda-card-meta-grid div {
   min-width: 0;
@@ -1072,24 +1076,73 @@
 }
 .agenda-card-meta-grid strong {
   display: block;
-  overflow: hidden;
   margin-top: 3px;
   color: var(--admin-text);
   font-size: 11px;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .agenda-phone-line {
   gap: 6px;
-  margin-top: 10px;
   color: var(--admin-text-muted);
   font-size: 11px;
   font-weight: 700;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.agenda-card-quickline {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--admin-border);
+  background: rgba(58,10,30,0.025);
+}
+.agenda-card-quickline strong {
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.agenda-card-quickline span {
+  color: var(--admin-text-muted);
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.agenda-card-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.agenda-card-mini-grid div {
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  background: var(--admin-bg);
+  padding: 9px 10px;
+  display: grid;
+  gap: 4px;
+}
+.agenda-card-mini-grid span {
+  color: var(--admin-text-muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.agenda-card-mini-grid strong {
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.35;
 }
 .agenda-reschedule-row {
   gap: 6px;
-  margin-top: 10px;
 }
 .agenda-reschedule-row input {
   flex: 1;
@@ -1098,7 +1151,6 @@
 .agenda-card-actions {
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 10px;
 }
 .agenda-card-actions button {
   min-height: 30px;
@@ -1108,6 +1160,35 @@
 .agenda-delete-btn {
   color: #dc2626 !important;
   border-color: rgba(220,38,38,0.42) !important;
+}
+.agenda-client-choice {
+  margin-bottom: 2px;
+}
+.agenda-client-mode-note {
+  color: var(--admin-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .agenda-booking-card {
+    min-height: 168px;
+  }
+
+  .agenda-booking-hover-panel {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transform: translateY(-6px);
+    transition: max-height 0.22s ease, opacity 0.18s ease, transform 0.18s ease;
+  }
+
+  .agenda-booking-card:hover .agenda-booking-hover-panel,
+  .agenda-booking-card:focus-within .agenda-booking-hover-panel {
+    max-height: 460px;
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* -- Agenda create modal -- */

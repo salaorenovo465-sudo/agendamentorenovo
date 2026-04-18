@@ -15,6 +15,7 @@ export type ClientAgentRule = {
   enabled: boolean;
   referenceDate: string;
   nextRunDate: string;
+  sendAt: string;
   createdAt: string;
   updatedAt: string;
   lastExecutedAt: string | null;
@@ -31,13 +32,24 @@ export type ClientAgentEvent = {
   messagePreview: string;
   createdAt: string;
   taskId: number | null;
-  status: 'queued' | 'skipped';
+  status: 'queued' | 'sent' | 'failed' | 'skipped' | 'canceled';
   reason: string | null;
+  sentAt: string | null;
+  providerMessageId: string | null;
 };
 
 type ClientAgentStateResponse = {
   rules: ClientAgentRule[];
   events: ClientAgentEvent[];
+};
+
+export type ClientAgentRunResponse = ClientAgentStateResponse & {
+  outcome: {
+    dispatched: boolean;
+    mode: 'whatsapp' | 'task' | 'skipped';
+    message: string;
+    error: string | null;
+  };
 };
 
 export const getClientAgentStateForAdmin = async (
@@ -66,3 +78,16 @@ export const saveClientAgentStateForAdmin = async (
   );
 };
 
+export const runClientAgentRuleForAdmin = async (
+  ruleId: string,
+  adminKey: string,
+  tenantSlug?: string,
+): Promise<ClientAgentRunResponse> => {
+  return requestAdmin<ClientAgentRunResponse>(
+    withTenantQuery(`/api/admin/workbench/client-agents/${encodeURIComponent(ruleId)}/run`, tenantSlug),
+    adminKey,
+    {
+      method: 'POST',
+    },
+  );
+};

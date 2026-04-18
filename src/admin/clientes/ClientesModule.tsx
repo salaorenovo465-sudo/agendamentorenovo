@@ -25,6 +25,7 @@ import {
   listAdminBookings,
   listBookingsByPhoneForAdmin,
   listWorkbenchEntityForAdmin,
+  runClientAgentRuleForAdmin,
   saveClientAgentStateForAdmin,
   updateWorkbenchEntityForAdmin,
   type ClientAgentChannel,
@@ -33,7 +34,7 @@ import {
   type ClientAgentRule,
 } from '../api';
 import { DangerConfirmModal } from '../AdminHelpers';
-import { formatDateBR, toNumber, toStringValue } from '../AdminUtils';
+import { formatBrazilWhatsappInput, formatDateBR, toNumber, toStringValue } from '../AdminUtils';
 import type { AdminBooking } from '../types';
 import './clientes-module.css';
 
@@ -54,6 +55,8 @@ type AgentDraft = {
   intervalUnit: ClientAgentIntervalUnit;
   channel: ClientAgentChannel;
   messageTemplate: string;
+  nextRunDate: string;
+  sendAt: string;
 };
 
 type ClientServiceSnapshot = { name: string; count: number; lastDate: string | null };
@@ -142,6 +145,15 @@ const CLIENT_COLUMNS: Array<{ status: ClientStatus; label: string; hint: string 
 const STATUS_SET = new Set(CLIENT_COLUMNS.map((column) => column.status));
 const DAY_MS = 1000 * 60 * 60 * 24;
 const TODAY = (): string => new Date().toISOString().slice(0, 10);
+const NOW_LOCAL = (): string => {
+  const current = new Date();
+  const year = current.getFullYear();
+  const month = String(current.getMonth() + 1).padStart(2, '0');
+  const day = String(current.getDate()).padStart(2, '0');
+  const hour = String(current.getHours()).padStart(2, '0');
+  const minute = String(current.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
 
 const formatDate = (value: string): string => (value ? formatDateBR(value) : '--');
 
@@ -150,6 +162,13 @@ const formatDateTime = (value: string): string => {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const formatLocalDateTime = (value: string): string => {
+  if (!value) return '--';
+  const [date, time] = value.split('T');
+  if (!date) return value;
+  return `${formatDate(date)}${time ? ` as ${time}` : ''}`;
 };
 
 const parseMoney = (value: string | null): number => {
@@ -190,13 +209,13 @@ const addInterval = (baseDate: string, value: number, unit: ClientAgentIntervalU
   return `${y}-${m}-${d}`;
 };
 
+const buildDefaultSendAt = (nextRunDate: string): string => `${nextRunDate}T09:00`;
+
 const renderAgentMessage = (template: string, payload: { cliente: string; servico: string; data_proxima: string }): string =>
   template
     .replaceAll('{cliente}', payload.cliente)
     .replaceAll('{servico}', payload.servico)
     .replaceAll('{data_proxima}', payload.data_proxima);
-
-const isSameOrBefore = (left: string, right: string): boolean => left <= right;
 
 const getClientInitials = (value: string): string => {
   const parts = value.trim().split(/\s+/).filter(Boolean);
@@ -260,8 +279,10 @@ const buildDefaultDraft = (clientName: string, serviceName = ''): AgentDraft => 
   serviceName,
   intervalValue: 3,
   intervalUnit: 'months',
-  channel: 'manual',
+  channel: 'whatsapp',
   messageTemplate: `Ola {cliente}, ja estamos no periodo ideal para revisao do servico {servico}. Sua proxima sugestao de retorno: {data_proxima}.`,
+  nextRunDate: TODAY(),
+  sendAt: buildDefaultSendAt(TODAY()),
 });
 
 const toDateValue = (value: string | null): number => {
@@ -411,7 +432,7 @@ const buildAgentControlTower = ({
 }): AgentControlTower => {
   const topService = summary.services[0]?.name || toStringValue(currentClient.preferred_service) || agentDraft.serviceName || 'Servico nao definido';
   const serviceCadence = recommendCadence(topService);
-  const queuedEvents = clientEvents.filter((event) => event.status === 'queued').length;
+  const queuedEvents = clientRules.filter((rule) => rule.enabled && rule.sendAt >= NOW_LOCAL()).length;
   const pendingTasks = clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length;
 
   const channelLabel = agentDraft.channel === 'manual'
@@ -450,8 +471,8 @@ const buildAgentControlTower = ({
     },
     {
       label: 'Dispatch',
-      value: formatDate(agentPreviewNextDate),
-      detail: `${decision.priorityLabel} | fila ${queuedEvents} | tarefas abertas ${pendingTasks} | owner ${decision.owner}.`,
+      value: formatLocalDateTime(agentDraft.sendAt),
+      detail: `${decision.priorityLabel} | proxima execucao ${formatDate(agentPreviewNextDate)} | fila ${queuedEvents} | tarefas abertas ${pendingTasks} | owner ${decision.owner}.`,
       tone: decision.priority === 'alta' ? 'risk' : queuedEvents > 0 || pendingTasks > 0 ? 'active' : 'neutral',
     },
   ];
@@ -527,8 +548,8 @@ const buildClientInsight = (
   const clientId = toNumber(client.id);
   const clientRules = clientId ? rulesByClientId.get(clientId) || [] : [];
   const enabledRules = clientRules.filter((rule) => rule.enabled);
-  const nextReminder = enabledRules.slice().sort((left, right) => left.nextRunDate.localeCompare(right.nextRunDate))[0]?.nextRunDate || null;
-  const overdueRuleCount = enabledRules.filter((rule) => rule.nextRunDate <= TODAY()).length;
+  const nextReminder = enabledRules.slice().sort((left, right) => left.sendAt.localeCompare(right.sendAt))[0]?.sendAt.slice(0, 10) || null;
+  const overdueRuleCount = enabledRules.filter((rule) => rule.sendAt <= NOW_LOCAL()).length;
   const status = normalizeClientStatus(client.status);
 
   let tone: ClientTone = 'neutral';
@@ -574,6 +595,7 @@ const buildClientInsight = (
 function ClienteModal({
   client,
   adminKey,
+  tenantSlug,
   rules,
   events,
   onSaveAgentState,
@@ -582,6 +604,7 @@ function ClienteModal({
 }: {
   client: ClientRecord;
   adminKey: string;
+  tenantSlug: string;
   rules: ClientAgentRule[];
   events: ClientAgentEvent[];
   onSaveAgentState: (nextRules: ClientAgentRule[], nextEvents: ClientAgentEvent[]) => Promise<void>;
@@ -635,7 +658,7 @@ function ClienteModal({
   }, [loadClientContext]);
 
   const clientRules = useMemo(
-    () => rules.filter((rule) => rule.clientId === clientId).sort((a, b) => a.nextRunDate.localeCompare(b.nextRunDate)),
+    () => rules.filter((rule) => rule.clientId === clientId).sort((a, b) => a.sendAt.localeCompare(b.sendAt)),
     [clientId, rules],
   );
 
@@ -650,8 +673,8 @@ function ClienteModal({
     const services = resolveServiceList(confirmed);
     const lastVisit = confirmed.slice().sort((a, b) => b.date.localeCompare(a.date))[0] || null;
     const avgTicket = confirmed.length > 0 ? totalSpent / confirmed.length : 0;
-    const nextReminder = clientRules.filter((rule) => rule.enabled).slice().sort((a, b) => a.nextRunDate.localeCompare(b.nextRunDate))[0]?.nextRunDate || null;
-    const overdueRuleCount = clientRules.filter((rule) => rule.enabled && rule.nextRunDate <= TODAY()).length;
+    const nextReminder = clientRules.filter((rule) => rule.enabled).slice().sort((a, b) => a.sendAt.localeCompare(b.sendAt))[0]?.sendAt.slice(0, 10) || null;
+    const overdueRuleCount = clientRules.filter((rule) => rule.enabled && rule.sendAt <= NOW_LOCAL()).length;
     const dormancyDays = daysSince(lastVisit?.date || null);
     return {
       totalSpent,
@@ -669,12 +692,16 @@ function ClienteModal({
   useEffect(() => {
     const topService = summary.services[0]?.name || toStringValue(currentClient.preferred_service);
     const cadence = recommendCadence(topService);
+    const referenceDate = resolveLatestServiceDate(bookings, topService) || TODAY();
+    const nextRunDate = addInterval(referenceDate, cadence.value, cadence.unit);
     setAgentDraft({
       ...buildDefaultDraft(clientName, topService),
       intervalValue: cadence.value,
       intervalUnit: cadence.unit,
+      nextRunDate,
+      sendAt: buildDefaultSendAt(nextRunDate),
     });
-  }, [clientName, currentClient.preferred_service, summary.services]);
+  }, [bookings, clientName, currentClient.preferred_service, summary.services]);
 
   const serviceScenarios = useMemo(() => {
     const baseServices = summary.services.length > 0
@@ -710,29 +737,26 @@ function ClienteModal({
     () => resolveLatestServiceDate(bookings, agentDraft.serviceName) || TODAY(),
     [agentDraft.serviceName, bookings],
   );
-
-  const agentPreviewNextDate = useMemo(
-    () => addInterval(agentPreviewReferenceDate, Number(agentDraft.intervalValue) || 1, agentDraft.intervalUnit),
-    [agentDraft.intervalUnit, agentDraft.intervalValue, agentPreviewReferenceDate],
-  );
+  const agentPreviewNextDate = agentDraft.nextRunDate;
+  const agentPreviewSendAt = agentDraft.sendAt;
 
   const agentPreviewMessage = useMemo(
     () => renderAgentMessage(agentDraft.messageTemplate, {
       cliente: clientName || 'Cliente',
       servico: agentDraft.serviceName || 'servico',
-      data_proxima: formatDate(agentPreviewNextDate),
+      data_proxima: formatDate(agentDraft.nextRunDate),
     }),
-    [agentDraft.messageTemplate, agentDraft.serviceName, agentPreviewNextDate, clientName],
+    [agentDraft.messageTemplate, agentDraft.nextRunDate, agentDraft.serviceName, clientName],
   );
 
   const agentExecutionDecision = useMemo(
     () => resolveAgentDecision({
       summary,
       requestedChannel: agentDraft.channel,
-      queuedEvents: clientEvents.filter((event) => event.status === 'queued').length,
+      queuedEvents: clientRules.filter((rule) => rule.enabled && rule.sendAt >= NOW_LOCAL()).length,
       pendingTasks: clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length,
     }),
-    [agentDraft.channel, clientEvents, clientTaskTimeline, summary],
+    [agentDraft.channel, clientRules, clientTaskTimeline, summary],
   );
 
   const agentControlTower = useMemo(
@@ -750,7 +774,6 @@ function ClienteModal({
     [
       agentDraft,
       agentExecutionDecision,
-      agentPreviewNextDate,
       agentPreviewReferenceDate,
       clientEvents,
       clientRules,
@@ -761,12 +784,16 @@ function ClienteModal({
   );
 
   const activeRulesCount = clientRules.filter((rule) => rule.enabled).length;
-  const queuedEventsCount = clientEvents.filter((event) => event.status === 'queued').length;
+  const queuedEventsCount = clientRules.filter((rule) => rule.enabled && rule.sendAt >= NOW_LOCAL()).length;
   const pendingTaskCount = clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length;
   const recentAgentEvents = clientEvents.slice(0, 4);
 
   const handleSaveClient = async () => {
     if (!clientId) return;
+    if (normalizePhone(toStringValue(draft.phone)).length < 12) {
+      setAgentError('Informe um WhatsApp valido com prefixo +55 antes de salvar.');
+      return;
+    }
     setSaving(true);
     setAgentError('');
     try {
@@ -803,9 +830,26 @@ function ClienteModal({
     if (!clientId) return;
     const serviceName = agentDraft.serviceName.trim();
     const intervalValue = Number(agentDraft.intervalValue);
+    const nextRunDate = agentDraft.nextRunDate;
+    const sendAt = agentDraft.sendAt;
 
     if (!serviceName || !Number.isFinite(intervalValue) || intervalValue < 1) {
       setAgentError('Informe servico e intervalo valido para programar o agente.');
+      return;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(nextRunDate)) {
+      setAgentError('Defina a proxima execucao em formato valido.');
+      return;
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(sendAt)) {
+      setAgentError('Defina a data e hora do envio em formato valido.');
+      return;
+    }
+
+    if (sendAt.slice(0, 10) > nextRunDate) {
+      setAgentError('O envio do lembrete nao pode ficar depois da proxima execucao.');
       return;
     }
 
@@ -822,7 +866,6 @@ function ClienteModal({
 
     const latestServiceDate = resolveLatestServiceDate(bookings, serviceName);
     const referenceDate = latestServiceDate || TODAY();
-    const nextRunDate = addInterval(referenceDate, intervalValue, agentDraft.intervalUnit);
     const now = new Date().toISOString();
     const newRule: ClientAgentRule = {
       id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -836,6 +879,7 @@ function ClienteModal({
       enabled: true,
       referenceDate,
       nextRunDate,
+      sendAt,
       createdAt: now,
       updatedAt: now,
       lastExecutedAt: null,
@@ -873,95 +917,41 @@ function ClienteModal({
     }
   };
 
+  const handlePatchRule = async (ruleId: string, patch: Partial<ClientAgentRule>) => {
+    const nextRules = rules.map((rule) => {
+      if (rule.id !== ruleId) {
+        return rule;
+      }
+
+      const nextRule = {
+        ...rule,
+        ...patch,
+        updatedAt: new Date().toISOString(),
+      };
+
+      if (nextRule.sendAt.slice(0, 10) > nextRule.nextRunDate) {
+        throw new Error('O envio do lembrete nao pode ficar depois da proxima execucao.');
+      }
+
+      return nextRule;
+    });
+
+    await onSaveAgentState(nextRules, events);
+  };
+
   const handleRunRule = async (rule: ClientAgentRule) => {
     setAgentBusyRule(rule.id);
     setAgentError('');
     try {
-      const today = TODAY();
-      const scheduledFor = isSameOrBefore(rule.nextRunDate, today) ? today : rule.nextRunDate;
-      const decision = resolveAgentDecision({
-        summary,
-        requestedChannel: rule.channel,
-        queuedEvents: events.filter((event) => event.status === 'queued').length,
-        pendingTasks: clientTaskTimeline.filter((task) => toStringValue(task.status) !== 'concluida').length,
-      });
-      const duplicated = events.some((event) => event.ruleId === rule.id && event.scheduledFor === scheduledFor && event.status === 'queued');
-      const duplicatedTask = clientTaskTimeline.some((task) => (
-        toStringValue(task.notes).includes(`rule:${rule.id}`)
-        && toStringValue(task.due_date) === scheduledFor
-        && toStringValue(task.status) !== 'concluida'
-      ));
-      if (duplicated || duplicatedTask) {
-        const skippedEvent: ClientAgentEvent = {
-          id: `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          ruleId: rule.id,
-          clientId: rule.clientId,
-          clientName: rule.clientName,
-          serviceName: rule.serviceName,
-          channel: rule.channel,
-          scheduledFor,
-          messagePreview: '',
-          createdAt: new Date().toISOString(),
-          taskId: null,
-          status: 'skipped',
-          reason: duplicatedTask ? 'Tarefa operacional ja existe para a mesma data.' : 'Aviso ja existe para a mesma data.',
-        };
-        await onSaveAgentState(rules, [skippedEvent, ...events]);
+      const response = await runClientAgentRuleForAdmin(rule.id, adminKey, tenantSlug);
+      await onSaveAgentState(response.rules, response.events);
+      if (!response.outcome.dispatched) {
+        setAgentError(response.outcome.error || response.outcome.message);
         return;
       }
-
-      const preview = renderAgentMessage(rule.messageTemplate, {
-        cliente: rule.clientName,
-        servico: rule.serviceName,
-        data_proxima: formatDate(scheduledFor),
-      });
-
-      const taskRow = await createWorkbenchEntityForAdmin(
-        'tasks',
-        {
-          title: `${decision.priority === 'alta' ? 'Acao prioritaria' : 'Aviso recorrencia'}: ${rule.clientName} - ${rule.serviceName}`,
-          owner: decision.owner,
-          due_date: scheduledFor,
-          priority: decision.priority,
-          status: 'pendente',
-          related_client: rule.clientName,
-          notes: `agente_cliente|rule:${rule.id}|cliente:${rule.clientId}|canal:${decision.channel}|prioridade:${decision.priority}|score:${decision.urgencyScore}|modo:${decision.modeLabel}|mensagem:${preview}`,
-        },
-        adminKey,
-      );
-
-      const now = new Date().toISOString();
-      const queuedEvent: ClientAgentEvent = {
-        id: `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        ruleId: rule.id,
-        clientId: rule.clientId,
-        clientName: rule.clientName,
-        serviceName: rule.serviceName,
-        channel: rule.channel,
-        scheduledFor,
-        messagePreview: preview,
-        createdAt: now,
-        taskId: toNumber(taskRow.id) || null,
-        status: 'queued',
-        reason: null,
-      };
-
-      const nextRules = rules.map((row) => {
-        if (row.id !== rule.id) return row;
-        const nextReferenceDate = scheduledFor;
-        return {
-          ...row,
-          referenceDate: nextReferenceDate,
-          nextRunDate: addInterval(nextReferenceDate, row.intervalValue, row.intervalUnit),
-          updatedAt: now,
-          lastExecutedAt: now,
-        };
-      });
-
-      await onSaveAgentState(nextRules, [queuedEvent, ...events]);
       await loadClientContext();
     } catch (error) {
-      setAgentError(error instanceof Error ? error.message : 'Falha ao executar agente simulado.');
+      setAgentError(error instanceof Error ? error.message : 'Falha ao executar o agente.');
     } finally {
       setAgentBusyRule(null);
     }
@@ -1167,7 +1157,7 @@ function ClienteModal({
                               </div>
                               <div>
                                 <label className="admin-label">Telefone</label>
-                                <input className="admin-input" value={toStringValue(draft.phone)} onChange={(event) => setDraft((current) => ({ ...current, phone: event.target.value }))} />
+                                <input className="admin-input" value={toStringValue(draft.phone)} onChange={(event) => setDraft((current) => ({ ...current, phone: formatBrazilWhatsappInput(event.target.value) }))} />
                               </div>
                               <div>
                                 <label className="admin-label">Email</label>
@@ -1295,12 +1285,21 @@ function ClienteModal({
                                 key={scenario.serviceName}
                                 type="button"
                                 className="clientes-scenario-card"
-                                onClick={() => setAgentDraft((current) => ({
-                                  ...current,
-                                  serviceName: scenario.serviceName,
-                                  intervalValue: scenario.recommendation.value,
-                                  intervalUnit: scenario.recommendation.unit,
-                                }))}
+                                onClick={() => {
+                                  const nextRunDate = addInterval(
+                                    scenario.lastDate || TODAY(),
+                                    scenario.recommendation.value,
+                                    scenario.recommendation.unit,
+                                  );
+                                  setAgentDraft((current) => ({
+                                    ...current,
+                                    serviceName: scenario.serviceName,
+                                    intervalValue: scenario.recommendation.value,
+                                    intervalUnit: scenario.recommendation.unit,
+                                    nextRunDate,
+                                    sendAt: buildDefaultSendAt(nextRunDate),
+                                  }));
+                                }}
                               >
                                 <strong>{scenario.serviceName}</strong>
                                 <span>{formatInterval(scenario.recommendation.value, scenario.recommendation.unit)}</span>
@@ -1322,13 +1321,13 @@ function ClienteModal({
                             <p>{agentExecutionDecision.priorityLabel} | {agentExecutionDecision.owner}</p>
                           </div>
                           <div>
-                            <span>Mensagem gerada</span>
-                            <p>{agentPreviewMessage}</p>
+                            <span>Envio programado</span>
+                            <strong>{formatLocalDateTime(agentPreviewSendAt)}</strong>
+                            <p>Janela real em que o WhatsApp deve ser disparado.</p>
                           </div>
                           <div>
-                            <span>Roteamento</span>
-                            <strong>{agentExecutionDecision.modeLabel}</strong>
-                            <p>{agentControlTower.channelDetail}</p>
+                            <span>Mensagem gerada</span>
+                            <p>{agentPreviewMessage}</p>
                           </div>
                         </div>
 
@@ -1356,6 +1355,14 @@ function ClienteModal({
                               <option value="whatsapp">WhatsApp</option>
                               <option value="email">Email</option>
                             </select>
+                          </div>
+                          <div>
+                            <label className="admin-label">Proxima execucao</label>
+                            <input className="admin-input" type="date" value={agentDraft.nextRunDate} onChange={(event) => setAgentDraft((current) => ({ ...current, nextRunDate: event.target.value }))} />
+                          </div>
+                          <div>
+                            <label className="admin-label">Data e hora do envio</label>
+                            <input className="admin-input" type="datetime-local" value={agentDraft.sendAt} onChange={(event) => setAgentDraft((current) => ({ ...current, sendAt: event.target.value }))} />
                           </div>
                           <div className="clientes-edit-full">
                             <label className="admin-label">Template</label>
@@ -1405,10 +1412,39 @@ function ClienteModal({
                                 </div>
                                 <div className="clientes-rule-grid">
                                   <div><span>Referencia</span><strong>{formatDate(rule.referenceDate)}</strong></div>
-                                  <div><span>Proximo ciclo</span><strong>{formatDate(rule.nextRunDate)}</strong></div>
+                                  <div><span>Proxima execucao</span><strong>{formatDate(rule.nextRunDate)}</strong></div>
+                                  <div><span>Envio</span><strong>{formatLocalDateTime(rule.sendAt)}</strong></div>
                                   <div><span>Ultima execucao</span><strong>{rule.lastExecutedAt ? formatDateTime(rule.lastExecutedAt) : '--'}</strong></div>
                                 </div>
                                 <p>{rule.messageTemplate}</p>
+                                <div className="clientes-agent-form clientes-rule-editor">
+                                  <div>
+                                    <label className="admin-label">Proxima execucao</label>
+                                    <input
+                                      className="admin-input"
+                                      type="date"
+                                      value={rule.nextRunDate}
+                                      onChange={(event) => {
+                                        void handlePatchRule(rule.id, { nextRunDate: event.target.value }).catch((error) => {
+                                          setAgentError(error instanceof Error ? error.message : 'Falha ao atualizar a proxima execucao.');
+                                        });
+                                      }}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="admin-label">Data e hora do envio</label>
+                                    <input
+                                      className="admin-input"
+                                      type="datetime-local"
+                                      value={rule.sendAt}
+                                      onChange={(event) => {
+                                        void handlePatchRule(rule.id, { sendAt: event.target.value }).catch((error) => {
+                                          setAgentError(error instanceof Error ? error.message : 'Falha ao atualizar a janela de envio.');
+                                        });
+                                      }}
+                                    />
+                                  </div>
+                                </div>
                                 <div className="clientes-rule-actions">
                                   <button type="button" className="admin-btn-outline" onClick={() => void handleToggleRule(rule.id, !rule.enabled)}>
                                     {rule.enabled ? 'Pausar' : 'Reativar'}
@@ -1439,8 +1475,8 @@ function ClienteModal({
                                 <article key={event.id}>
                                   <div>
                                     <strong>{event.serviceName}</strong>
-                                    <span>{formatDate(event.scheduledFor)} | canal {event.channel}</span>
-                                    <small>{event.messagePreview || event.reason || 'Sem mensagem registrada'}</small>
+                                    <span>{formatLocalDateTime(event.scheduledFor)} | canal {event.channel}</span>
+                                    <small>{event.sentAt ? `Enviado em ${formatDateTime(event.sentAt)}. ` : ''}{event.messagePreview || event.reason || 'Sem mensagem registrada'}</small>
                                   </div>
                                   <span className={`event-${event.status}`}>{event.status}</span>
                                 </article>
@@ -1574,8 +1610,8 @@ function ClienteModal({
                               <article key={event.id}>
                                 <div>
                                   <strong>{event.serviceName}</strong>
-                                  <span>Agendado para {formatDate(event.scheduledFor)}</span>
-                                  <small>{event.messagePreview || event.reason || 'Sem mensagem registrada'}</small>
+                                  <span>Agendado para {formatLocalDateTime(event.scheduledFor)}</span>
+                                  <small>{event.sentAt ? `Enviado em ${formatDateTime(event.sentAt)}. ` : ''}{event.messagePreview || event.reason || 'Sem mensagem registrada'}</small>
                                 </div>
                                 <span className={`event-${event.status}`}>{event.status}</span>
                               </article>
@@ -1655,7 +1691,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
   const [agentStateSaving, setAgentStateSaving] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({
     name: '',
-    phone: '',
+    phone: '+55',
     email: '',
     status: 'novo',
     preferred_service: '',
@@ -1853,7 +1889,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
   }, [boardItems, selectedClient]);
 
   const handleCreateClient = async () => {
-    if (!toStringValue(createDraft.name).trim() || !toStringValue(createDraft.phone).trim()) {
+    if (!toStringValue(createDraft.name).trim() || normalizePhone(toStringValue(createDraft.phone)).length < 12) {
       setError('Nome e telefone sao obrigatorios para criar cliente.');
       return;
     }
@@ -1864,7 +1900,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
       setShowCreateModal(false);
       setCreateDraft({
         name: '',
-        phone: '',
+        phone: '+55',
         email: '',
         status: 'novo',
         preferred_service: '',
@@ -2196,7 +2232,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
                 </div>
                 <div>
                   <label className="admin-label">Telefone *</label>
-                  <input className="admin-input" value={toStringValue(createDraft.phone)} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: event.target.value }))} />
+                  <input className="admin-input" value={toStringValue(createDraft.phone)} onChange={(event) => setCreateDraft((current) => ({ ...current, phone: formatBrazilWhatsappInput(event.target.value) }))} />
                 </div>
                 <div>
                   <label className="admin-label">Email</label>
@@ -2239,6 +2275,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
         <ClienteModal
           client={selectedResolvedClient}
           adminKey={adminKey}
+          tenantSlug={tenantSlug}
           rules={agentRules}
           events={agentEvents}
           onSaveAgentState={persistAgentState}

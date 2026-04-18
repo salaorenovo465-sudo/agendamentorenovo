@@ -16,7 +16,7 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
-import { formatDateBR } from '../AdminUtils';
+import { formatBrazilWhatsappInput, formatDateBR, toStringValue } from '../AdminUtils';
 import { exportBookingsCSV } from '../AdminFeatures';
 import { getBookingAvailability } from '../api';
 import type { AdminBooking, AdminCreateBookingPayload } from '../types';
@@ -36,6 +36,8 @@ type SelectedAgendaService = {
 };
 
 type CreateBookingForm = {
+  clientMode: 'existing' | 'guest';
+  clientId: string;
   name: string;
   phone: string;
   category: string;
@@ -92,8 +94,10 @@ const buildInitialForm = (catalog: ServiceCatalogCategory[], date: string): Crea
   const firstCategory = catalog[0];
 
   return {
+    clientMode: 'guest',
+    clientId: '',
     name: '',
-    phone: '',
+    phone: '+55',
     category: firstCategory?.category || '',
     service: '',
     servicePrice: '',
@@ -153,6 +157,7 @@ export function AgendaTab({
   onAssignProfessional,
   onClearHistory,
   serviceCatalog,
+  clients,
   professionals,
   defaultCreateDate,
 }: {
@@ -172,6 +177,7 @@ export function AgendaTab({
   onAssignProfessional: (booking: AdminBooking, professionalId: number | null) => Promise<void>;
   onClearHistory: () => Promise<void>;
   serviceCatalog: ServiceCatalogCategory[];
+  clients: Record<string, unknown>[];
   professionals: Record<string, unknown>[];
   defaultCreateDate: string;
 }) {
@@ -240,6 +246,18 @@ export function AgendaTab({
     });
   }, [availableCollaborators, createForm.selectedServices]);
 
+  const sortedClients = useMemo(
+    () => clients
+      .slice()
+      .sort((left, right) => toStringValue(left.name).localeCompare(toStringValue(right.name), 'pt-BR')),
+    [clients],
+  );
+
+  const selectedClientRecord = useMemo(
+    () => sortedClients.find((row) => String(row.id || '') === createForm.clientId) || null,
+    [createForm.clientId, sortedClients],
+  );
+
   const isSlotBusy = (slot: string): boolean => availability.busySlots.includes('all') || availability.busySlots.includes(slot);
   const selectedTimeBusy = isSlotBusy(createForm.time);
   const availableSlotsCount = AGENDA_TIME_SLOTS.filter((slot) => !isSlotBusy(slot)).length;
@@ -299,6 +317,27 @@ export function AgendaTab({
     setCreateOpen(true);
   };
 
+  const handleClientModeChange = (mode: 'existing' | 'guest') => {
+    setCreateForm((current) => ({
+      ...current,
+      clientMode: mode,
+      clientId: mode === 'existing' ? current.clientId : '',
+      name: mode === 'existing' ? current.name : '',
+      phone: mode === 'existing' ? current.phone : '+55',
+    }));
+  };
+
+  const handleClientSelect = (clientId: string) => {
+    const selected = sortedClients.find((row) => String(row.id || '') === clientId) || null;
+    setCreateForm((current) => ({
+      ...current,
+      clientMode: 'existing',
+      clientId,
+      name: toStringValue(selected?.name),
+      phone: toStringValue(selected?.phone) || '+55',
+    }));
+  };
+
   const handleClearHistory = async () => {
     setClearingHistory(true);
     try {
@@ -346,6 +385,7 @@ export function AgendaTab({
   const canCreate =
     createForm.name.trim().length >= 3 &&
     normalizeDigits(createForm.phone).length >= 8 &&
+    (createForm.clientMode === 'guest' || Boolean(createForm.clientId)) &&
     createForm.selectedServices.length > 0 &&
     /^\d{4}-\d{2}-\d{2}$/.test(createForm.date) &&
     /^\d{2}:\d{2}$/.test(createForm.time) &&
@@ -397,126 +437,154 @@ export function AgendaTab({
     const hasCollaborator = Boolean(booking.professionalId && booking.professionalName);
     const canEditCollaborator = booking.status !== 'completed' && booking.status !== 'rejected';
     const serviceItems = extractBookingServiceItems(booking);
+    const leadService = serviceItems[0]?.name || booking.service;
+    const additionalServices = Math.max(0, serviceItems.length - 1);
 
     return (
       <div key={booking.id} className={`agenda-booking-card agenda-booking-card-${statusKey}`} aria-busy={busy}>
-        <div className="agenda-card-topline">
-          <span className={`agenda-status-pill agenda-status-${statusKey}`}>
-            {showOverdueAlert ? 'Atrasado' : STATUS_LABELS[booking.status]}
-          </span>
-          <span className="agenda-card-id">#{booking.id}</span>
+        <div className="agenda-booking-static">
+          <div className="agenda-card-topline">
+            <span className={`agenda-status-pill agenda-status-${statusKey}`}>
+              {showOverdueAlert ? 'Atrasado' : STATUS_LABELS[booking.status]}
+            </span>
+            <span className="agenda-card-id">#{booking.id}</span>
+          </div>
+
+          {showOverdueAlert && (
+            <div className="agenda-overdue-ribbon">
+              <AlertTriangle style={{ width: 12, height: 12 }} /> passou do horario sem finalizacao
+            </div>
+          )}
+
+          <div className="agenda-client-row">
+            <div className="admin-avatar agenda-avatar">{booking.name.charAt(0).toUpperCase()}</div>
+            <div className="agenda-client-copy">
+              <p>{booking.name}</p>
+              <span>{leadService}{additionalServices > 0 ? ` +${additionalServices}` : ''}</span>
+            </div>
+          </div>
+
+          <div className="agenda-card-quickline">
+            <strong>{leadService}</strong>
+            <span>
+              {hasCollaborator
+                ? `Com ${booking.professionalName}`
+                : booking.status === 'pending'
+                  ? 'Aguardando colaborador para sair do pendente'
+                  : 'Sem colaborador vinculado'}
+            </span>
+          </div>
+
+          <div className="agenda-card-mini-grid">
+            <div>
+              <span>Data</span>
+              <strong>{formatDateBR(booking.date)}</strong>
+            </div>
+            <div>
+              <span>Hora</span>
+              <strong>{booking.time}</strong>
+            </div>
+          </div>
         </div>
 
-        {showOverdueAlert && (
-          <div className="agenda-overdue-ribbon">
-            <AlertTriangle style={{ width: 12, height: 12 }} /> passou do horario sem finalizacao
+        <div className="agenda-booking-hover-panel">
+          <div className="agenda-card-meta-grid">
+            <div>
+              <span>Data</span>
+              <strong>{formatDateBR(booking.date)}</strong>
+            </div>
+            <div>
+              <span>Hora</span>
+              <strong>{booking.time}</strong>
+            </div>
+            <div>
+              <span>Valor</span>
+              <strong>{booking.servicePrice || 'Sob consulta'}</strong>
+            </div>
+            <div>
+              <span>Colaborador</span>
+              <strong>{booking.professionalName || 'Nao definido'}</strong>
+            </div>
           </div>
-        )}
 
-        <div className="agenda-client-row">
-          <div className="admin-avatar agenda-avatar">{booking.name.charAt(0).toUpperCase()}</div>
-          <div className="agenda-client-copy">
-            <p>{booking.name}</p>
-            <span>{booking.service}</span>
+          <div className="agenda-phone-line">
+            <Phone style={{ width: 12, height: 12 }} /> {booking.phone}
           </div>
-        </div>
 
-        <div className="agenda-card-meta-grid">
-          <div>
-            <span>Data</span>
-            <strong>{formatDateBR(booking.date)}</strong>
-          </div>
-          <div>
-            <span>Hora</span>
-            <strong>{booking.time}</strong>
-          </div>
-          <div>
-            <span>Valor</span>
-            <strong>{booking.servicePrice || 'Sob consulta'}</strong>
-          </div>
-          <div>
-            <span>Colaborador</span>
-            <strong>{booking.professionalName || 'Nao definido'}</strong>
-          </div>
-        </div>
+          {serviceItems.length > 0 && (
+            <div className="agenda-selected-services agenda-inline-services">
+              {serviceItems.map((service) => (
+                <button key={`${booking.id}-${service.name}`} type="button" disabled>
+                  <span>{service.name}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
-        <div className="agenda-phone-line">
-          <Phone style={{ width: 12, height: 12 }} /> {booking.phone}
-        </div>
+          <div className="agenda-assignee-panel">
+            <label className="admin-label">Colaborador responsavel</label>
+            <select
+              className="admin-input"
+              value={booking.professionalId ? String(booking.professionalId) : ''}
+              onChange={(event) => { void onAssignProfessional(booking, event.target.value ? Number(event.target.value) : null); }}
+              disabled={busy || !canEditCollaborator}
+            >
+              <option value="" disabled={booking.status !== 'pending'}>{booking.status === 'pending' ? 'Selecionar colaborador' : 'Colaborador obrigatorio'}</option>
+              {availableCollaborators.map((collaborator) => (
+                <option key={collaborator.id} value={collaborator.id}>
+                  {collaborator.name}
+                </option>
+              ))}
+            </select>
+            <small className={`agenda-assignee-help ${hasCollaborator ? 'ok' : 'warning'}`}>
+              {hasCollaborator ? `Responsavel atual: ${booking.professionalName}` : 'Obrigatorio para sair de pendente.'}
+            </small>
+          </div>
 
-        {serviceItems.length > 0 && (
-          <div className="agenda-selected-services agenda-inline-services">
-            {serviceItems.map((service) => (
-              <button key={`${booking.id}-${service.name}`} type="button" disabled>
-                <span>{service.name}</span>
+          {!hasCollaborator && booking.status === 'pending' && (
+            <div className="agenda-booking-warning">
+              <AlertTriangle style={{ width: 12, height: 12 }} /> selecione o colaborador antes de confirmar ou finalizar
+            </div>
+          )}
+
+          {booking.status !== 'completed' && (
+            <div className="agenda-reschedule-row">
+              <input
+                type="date"
+                className="admin-input-sm"
+                value={schedule.date}
+                onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, date: event.target.value } }))}
+              />
+              <input
+                type="time"
+                className="admin-input-sm"
+                value={schedule.time}
+                onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, time: event.target.value } }))}
+              />
+            </div>
+          )}
+
+          <div className="agenda-card-actions">
+            {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline">Remarcar</button>}
+            {booking.status !== 'confirmed' && booking.status !== 'completed' && (
+              <button disabled={busy || !hasCollaborator} onClick={() => void onConfirm(booking)} className="admin-btn-success">
+                <CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar
               </button>
-            ))}
-          </div>
-        )}
-
-        <div className="agenda-assignee-panel">
-          <label className="admin-label">Colaborador responsavel</label>
-          <select
-            className="admin-input"
-            value={booking.professionalId ? String(booking.professionalId) : ''}
-            onChange={(event) => { void onAssignProfessional(booking, event.target.value ? Number(event.target.value) : null); }}
-            disabled={busy || !canEditCollaborator}
-          >
-            <option value="" disabled={booking.status !== 'pending'}>{booking.status === 'pending' ? 'Selecionar colaborador' : 'Colaborador obrigatorio'}</option>
-            {availableCollaborators.map((collaborator) => (
-              <option key={collaborator.id} value={collaborator.id}>
-                {collaborator.name}
-              </option>
-            ))}
-          </select>
-          <small className={`agenda-assignee-help ${hasCollaborator ? 'ok' : 'warning'}`}>
-            {hasCollaborator ? `Responsavel atual: ${booking.professionalName}` : 'Obrigatorio para sair de pendente.'}
-          </small>
-        </div>
-
-        {!hasCollaborator && booking.status === 'pending' && (
-          <div className="agenda-booking-warning">
-            <AlertTriangle style={{ width: 12, height: 12 }} /> selecione o colaborador antes de confirmar ou finalizar
-          </div>
-        )}
-
-        {booking.status !== 'completed' && (
-          <div className="agenda-reschedule-row">
-            <input
-              type="date"
-              className="admin-input-sm"
-              value={schedule.date}
-              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, date: event.target.value } }))}
-            />
-            <input
-              type="time"
-              className="admin-input-sm"
-              value={schedule.time}
-              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, time: event.target.value } }))}
-            />
-          </div>
-        )}
-
-        <div className="agenda-card-actions">
-          {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline">Remarcar</button>}
-          {booking.status !== 'confirmed' && booking.status !== 'completed' && (
-            <button disabled={busy || !hasCollaborator} onClick={() => void onConfirm(booking)} className="admin-btn-success">
-              <CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar
+            )}
+            {(booking.status === 'confirmed' || isOverdue(booking)) && (
+              <button disabled={busy || !hasCollaborator} onClick={() => void onComplete(booking)} className="admin-btn-primary">
+                <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
+              </button>
+            )}
+            {booking.status !== 'rejected' && booking.status !== 'completed' && (
+              <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
+                <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
+              </button>
+            )}
+            <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
+              <Trash2 style={{ width: 12, height: 12 }} /> Excluir
             </button>
-          )}
-          {(booking.status === 'confirmed' || isOverdue(booking)) && (
-            <button disabled={busy || !hasCollaborator} onClick={() => void onComplete(booking)} className="admin-btn-primary">
-              <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
-            </button>
-          )}
-          {booking.status !== 'rejected' && booking.status !== 'completed' && (
-            <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
-              <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
-            </button>
-          )}
-          <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
-            <Trash2 style={{ width: 12, height: 12 }} /> Excluir
-          </button>
+          </div>
         </div>
       </div>
     );
@@ -633,22 +701,82 @@ export function AgendaTab({
                   <UserRound style={{ width: 16, height: 16 }} /> Cliente e comando
                 </div>
 
-                <label className="admin-label">Nome do cliente</label>
-                <input
-                  className="admin-input"
-                  value={createForm.name}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
-                  placeholder="Nome completo"
-                  autoFocus
-                />
+                <div className="agenda-status-choice agenda-client-choice">
+                  <button
+                    type="button"
+                    className={createForm.clientMode === 'existing' ? 'active' : ''}
+                    onClick={() => handleClientModeChange('existing')}
+                  >
+                    Cliente cadastrado
+                  </button>
+                  <button
+                    type="button"
+                    className={createForm.clientMode === 'guest' ? 'active' : ''}
+                    onClick={() => handleClientModeChange('guest')}
+                  >
+                    Cliente avulso
+                  </button>
+                </div>
 
-                <label className="admin-label">WhatsApp</label>
-                <input
-                  className="admin-input"
-                  value={createForm.phone}
-                  onChange={(event) => setCreateForm((current) => ({ ...current, phone: event.target.value }))}
-                  placeholder="(31) 99999-9999"
-                />
+                {createForm.clientMode === 'existing' ? (
+                  <>
+                    <label className="admin-label">Selecionar cliente</label>
+                    <select
+                      className="admin-input"
+                      value={createForm.clientId}
+                      onChange={(event) => handleClientSelect(event.target.value)}
+                      autoFocus
+                    >
+                      <option value="">Escolher cliente da base</option>
+                      {sortedClients.map((client) => (
+                        <option key={String(client.id || toStringValue(client.phone))} value={String(client.id || '')}>
+                          {toStringValue(client.name) || 'Cliente sem nome'} | {toStringValue(client.phone) || '--'}
+                        </option>
+                      ))}
+                    </select>
+
+                    <label className="admin-label">Nome do cliente</label>
+                    <input
+                      className="admin-input"
+                      value={createForm.name}
+                      readOnly
+                      placeholder="Escolha um cliente da base"
+                    />
+
+                    <label className="admin-label">WhatsApp</label>
+                    <input
+                      className="admin-input"
+                      value={createForm.phone}
+                      readOnly
+                      placeholder="+55"
+                    />
+
+                    {selectedClientRecord && (
+                      <small className="agenda-client-mode-note">
+                        Historico unificado pelo cadastro selecionado. Servico preferido: {toStringValue(selectedClientRecord.preferred_service) || 'nao definido'}.
+                      </small>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <label className="admin-label">Nome do cliente</label>
+                    <input
+                      className="admin-input"
+                      value={createForm.name}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, name: event.target.value }))}
+                      placeholder="Nome completo"
+                      autoFocus
+                    />
+
+                    <label className="admin-label">WhatsApp</label>
+                    <input
+                      className="admin-input"
+                      value={createForm.phone}
+                      onChange={(event) => setCreateForm((current) => ({ ...current, phone: formatBrazilWhatsappInput(event.target.value) }))}
+                      placeholder="+55 (11) 99999-9999"
+                    />
+                  </>
+                )}
 
                 <div className="agenda-two-fields">
                   <div>

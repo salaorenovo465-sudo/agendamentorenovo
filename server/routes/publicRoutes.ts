@@ -15,6 +15,7 @@ import {
   notifyCustomerPendingBooking,
   notifySalonNewBooking,
 } from '../services/notificationService';
+import { normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}$/;
@@ -181,7 +182,7 @@ publicRoutes.post('/bookings', async (req, res) => {
   const serviceValue = typeof service === 'string' ? service.trim() : '';
   const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
   const customerName = typeof name === 'string' ? name.trim() : '';
-  const customerPhone = typeof phone === 'string' ? phone.trim() : '';
+  const customerPhone = typeof phone === 'string' ? (normalizeWhatsappPhoneWithPlus(phone) || phone.trim()) : '';
   const normalizedTime = typeof time === 'string' ? time.slice(0, 5) : '';
   const parsedServiceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
   const serviceItems = parsedServiceItems.length > 0

@@ -328,6 +328,7 @@ export default function AdminApp() {
     if (!adminKey) return;
     void loadTenants();
     void loadAllBookings();
+    void loadEntity('clients');
     void loadEntity('professionals');
   }, [adminKey]);
 
@@ -339,6 +340,10 @@ export default function AdminApp() {
 
   useEffect(() => {
     if (!adminKey) return;
+    if (activeTab === 'agenda') {
+      void loadEntity('clients');
+      return;
+    }
     const entity = ENTITY_BY_TAB[activeTab];
     if (entity && entity !== 'clients') {
       void loadEntity(entity);
@@ -985,6 +990,7 @@ export default function AdminApp() {
               onAssignProfessional={handleAssignBookingProfessional}
               onClearHistory={handleResetAgendaHistory}
               serviceCatalog={localServices}
+              clients={entityRows.clients}
               professionals={entityRows.professionals}
               defaultCreateDate={defaultAgendaDate}
             />

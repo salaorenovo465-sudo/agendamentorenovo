@@ -64,6 +64,29 @@ const summarizeSelectedServices = (selectedServices: SelectedBookingService[]): 
   };
 };
 
+const normalizePhoneDigits = (value: string): string => value.replace(/\D/g, '');
+
+const formatBrazilWhatsappInput = (value: string): string => {
+  const digits = normalizePhoneDigits(value);
+  const withoutCountry = digits.startsWith('55') ? digits.slice(2) : digits;
+  const limited = withoutCountry.slice(0, 11);
+  const ddd = limited.slice(0, 2);
+  const number = limited.slice(2);
+
+  let formatted = '+55';
+  if (!ddd) return formatted;
+
+  formatted += ` (${ddd}`;
+  if (ddd.length === 2) {
+    formatted += ')';
+  }
+
+  if (!number) return formatted;
+  if (number.length <= 4) return `${formatted} ${number}`;
+  if (number.length <= 8) return `${formatted} ${number.slice(0, 4)}-${number.slice(4)}`;
+  return `${formatted} ${number.slice(0, 5)}-${number.slice(5, 9)}`;
+};
+
 export default function BookingModal({
   isModalOpen,
   bookingData,
@@ -87,7 +110,7 @@ export default function BookingModal({
   const selectedServices = bookingData.selectedServices || [];
   const serviceSummary = summarizeSelectedServices(selectedServices);
   const isStep1Valid = selectedServices.length > 0 && bookingData.date && bookingData.time;
-  const isStep2Valid = bookingData.name.length > 2 && bookingData.phone.length > 8;
+  const isStep2Valid = bookingData.name.length > 2 && normalizePhoneDigits(bookingData.phone).length >= 12;
   const currentCategoryServices = services.find(c => c.category === selectedCategory)?.items || [];
 
   const toggleService = (service: { name: string; price: string }) => {
@@ -340,9 +363,9 @@ export default function BookingModal({
                   </label>
                   <input
                     type="tel"
-                    placeholder="(71) 90000-0000"
+                    placeholder="+55 (71) 90000-0000"
                     value={bookingData.phone}
-                    onChange={(e) => setBookingData({...bookingData, phone: e.target.value})}
+                    onChange={(e) => setBookingData({...bookingData, phone: formatBrazilWhatsappInput(e.target.value)})}
                     className="w-full bg-transparent border-b-2 border-luxury-dark/10 px-0 py-3 text-luxury-dark text-lg font-medium placeholder:text-luxury-muted/30 placeholder:font-light focus:outline-none focus:border-luxury-gold transition-all duration-500"
                   />
                 </div>

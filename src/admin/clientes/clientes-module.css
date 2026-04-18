@@ -1522,7 +1522,7 @@
 
 .clientes-rule-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1545,6 +1545,10 @@
 
 .clientes-rule-grid strong {
   font-size: 12px;
+}
+
+.clientes-rule-editor {
+  margin-top: 10px;
 }
 
 .clientes-timeline-summary {
@@ -1577,7 +1581,10 @@
 .status-completed,
 .status-rejected,
 .event-queued,
+.event-sent,
+.event-failed,
 .event-skipped,
+.event-canceled,
 .task-done,
 .task-pending {
   display: inline-flex;
@@ -1602,6 +1609,7 @@
 .status-confirmed,
 .status-completed,
 .event-queued,
+.event-sent,
 .task-done {
   color: #b7ffd4;
   background: rgba(84, 206, 131, 0.14);
@@ -1609,10 +1617,17 @@
 }
 
 .status-rejected,
-.event-skipped {
+.event-skipped,
+.event-failed {
   color: #ffbcbc;
   background: rgba(255, 108, 108, 0.14);
   border-color: rgba(255, 108, 108, 0.2);
+}
+
+.event-canceled {
+  color: var(--admin-text-muted);
+  background: rgba(58, 10, 30, 0.08);
+  border-color: rgba(58, 10, 30, 0.12);
 }
 
 .admin-btn-danger-soft {

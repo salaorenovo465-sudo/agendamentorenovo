@@ -76,10 +76,12 @@ export {
 export {
   getClientAgentStateForAdmin,
   saveClientAgentStateForAdmin,
+  runClientAgentRuleForAdmin,
 } from './clientAgentApi';
 export type {
   ClientAgentRule,
   ClientAgentEvent,
   ClientAgentIntervalUnit,
   ClientAgentChannel,
+  ClientAgentRunResponse,
 } from './clientAgentApi';

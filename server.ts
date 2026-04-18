@@ -8,6 +8,7 @@ import { adminWorkbenchRoutes } from './server/routes/adminWorkbenchRoutes';
 import { integrationRoutes } from './server/routes/integrationRoutes';
 import { publicRoutes } from './server/routes/publicRoutes';
 import { whatsappRoutes } from './server/routes/whatsappRoutes';
+import { startClientAgentScheduler } from './server/services/clientAgentService';
 import { initializeWhatsapp } from './server/services/whatsappService';
 
 const app = express();
@@ -79,6 +80,8 @@ app.use('/api/whatsapp', adminAuth, whatsappRoutes);
 void initializeWhatsapp().catch((error) => {
   console.error('Falha ao inicializar WhatsApp (Baileys):', error);
 });
+
+startClientAgentScheduler();
 
 app.listen(port, () => {
   console.log(`Servidor backend rodando na porta ${port}`);

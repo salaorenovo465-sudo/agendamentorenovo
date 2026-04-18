@@ -74,7 +74,7 @@ export default function App() {
     date: "",
     time: "",
     name: "",
-    phone: ""
+    phone: "+55"
   });
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
   const [bookedSlots, setBookedSlots] = useState<string[]>([]);
@@ -110,7 +110,7 @@ export default function App() {
     setTimeout(() => {
       setStep(1);
       setSelectedCategory("");
-      setBookingData({ service: "", servicePrice: "", selectedServices: [], date: "", time: "", name: "", phone: "" });
+      setBookingData({ service: "", servicePrice: "", selectedServices: [], date: "", time: "", name: "", phone: "+55" });
       setBookingSuccess(false);
       setIsSubmitting(false);
     }, 300);

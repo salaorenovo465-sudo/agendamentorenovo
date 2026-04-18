@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { workbenchStore, type WorkbenchEntity } from '../db/workbenchStore';
 import { bookingStore } from '../db/bookingStore';
 import { deleteCalendarEventById } from '../services/calendarService';
+import { runClientAgentRuleForTenant } from '../services/clientAgentService';
 import type { BookingRecord } from '../types';
 import { getTodayDate, parseId } from '../utils/helpers';
 
@@ -23,6 +24,7 @@ const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
 const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
 const CLIENT_AGENT_MAX_EVENTS = 600;
 const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const LOCAL_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
 const ISO_INSTANT_REGEX = /^\d{4}-\d{2}-\d{2}T/;
 const CLIENT_AGENT_INTERVAL_UNITS = new Set(['days', 'weeks', 'months']);
 const CLIENT_AGENT_CHANNELS = new Set(['whatsapp', 'email', 'manual']);
@@ -42,6 +44,7 @@ type ClientAgentRule = {
   enabled: boolean;
   referenceDate: string;
   nextRunDate: string;
+  sendAt: string;
   createdAt: string;
   updatedAt: string;
   lastExecutedAt: string | null;
@@ -58,8 +61,10 @@ type ClientAgentEvent = {
   messagePreview: string;
   createdAt: string;
   taskId: number | null;
-  status: 'queued' | 'skipped';
+  status: 'queued' | 'sent' | 'failed' | 'skipped' | 'canceled';
   reason: string | null;
+  sentAt: string | null;
+  providerMessageId: string | null;
 };
 
 const normalizeIsoDate = (value: unknown, fallback: string): string => {
@@ -76,6 +81,15 @@ const normalizeIsoInstant = (value: unknown, fallback: string): string => {
   }
   const normalized = value.trim();
   return ISO_INSTANT_REGEX.test(normalized) ? normalized : fallback;
+};
+
+const normalizeLocalDateTime = (value: unknown, fallback: string): string => {
+  if (typeof value !== 'string') {
+    return fallback;
+  }
+
+  const normalized = value.trim();
+  return LOCAL_DATETIME_REGEX.test(normalized) ? normalized : fallback;
 };
 
 const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
@@ -120,6 +134,7 @@ const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
 
     const referenceDate = normalizeIsoDate(row.referenceDate, today);
     const nextRunDate = normalizeIsoDate(row.nextRunDate, today);
+    const sendAt = normalizeLocalDateTime(row.sendAt, `${nextRunDate}T09:00`);
     const createdAt = normalizeIsoInstant(row.createdAt, nowIso);
     const updatedAt = normalizeIsoInstant(row.updatedAt, nowIso);
     const lastExecutedAt = row.lastExecutedAt === null
@@ -138,6 +153,7 @@ const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
       enabled,
       referenceDate,
       nextRunDate,
+      sendAt,
       createdAt,
       updatedAt,
       lastExecutedAt: lastExecutedAt || null,
@@ -176,12 +192,26 @@ const sanitizeClientAgentEvents = (value: unknown): ClientAgentEvent[] => {
     const channel = typeof row.channel === 'string' && CLIENT_AGENT_CHANNELS.has(row.channel)
       ? (row.channel as ClientAgentChannel)
       : 'manual';
-    const scheduledFor = normalizeIsoDate(row.scheduledFor, today);
+    const scheduledFor = normalizeLocalDateTime(row.scheduledFor, `${normalizeIsoDate(row.scheduledFor, today)}T09:00`);
     const messagePreview = typeof row.messagePreview === 'string' ? row.messagePreview.trim() : '';
     const createdAt = normalizeIsoInstant(row.createdAt, nowIso);
-    const status = row.status === 'skipped' ? 'skipped' : 'queued';
+    const status = row.status === 'sent'
+      ? 'sent'
+      : row.status === 'failed'
+        ? 'failed'
+        : row.status === 'skipped'
+          ? 'skipped'
+          : row.status === 'canceled'
+            ? 'canceled'
+            : 'queued';
     const reason = typeof row.reason === 'string' && row.reason.trim() ? row.reason.trim() : null;
     const taskId = Number(row.taskId || 0);
+    const sentAt = row.sentAt === null
+      ? null
+      : normalizeIsoInstant(row.sentAt, '');
+    const providerMessageId = typeof row.providerMessageId === 'string' && row.providerMessageId.trim()
+      ? row.providerMessageId.trim()
+      : null;
 
     if (!ruleId || !Number.isFinite(clientId) || clientId <= 0 || !clientName || !serviceName) {
       continue;
@@ -200,6 +230,8 @@ const sanitizeClientAgentEvents = (value: unknown): ClientAgentEvent[] => {
       taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : null,
       status,
       reason,
+      sentAt: sentAt || null,
+      providerMessageId,
     });
     seen.add(idRaw);
   }
@@ -495,6 +527,30 @@ adminWorkbenchRoutes.put('/client-agents', async (req, res) => {
       return res.status(503).json({ error: (error as Error).message });
     }
     return res.status(500).json({ error: 'Erro ao salvar estado do agente de clientes.' });
+  }
+});
+
+adminWorkbenchRoutes.post('/client-agents/:ruleId/run', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const ruleId = typeof req.params.ruleId === 'string' ? req.params.ruleId.trim() : '';
+  if (!ruleId) {
+    return res.status(400).json({ error: 'Informe a regra que deve ser executada.' });
+  }
+
+  try {
+    const result = await runClientAgentRuleForTenant(ruleId, tenant || undefined, { executeNow: true });
+    return res.json(result);
+  } catch (error) {
+    console.error('Erro ao executar regra do agente de clientes:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: error instanceof Error ? error.message : 'Erro ao executar regra do agente de clientes.' });
   }
 });
 
