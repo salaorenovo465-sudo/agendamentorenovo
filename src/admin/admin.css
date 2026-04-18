@@ -803,13 +803,14 @@
   margin: 8px 0 6px;
   color: #fff7e8;
   font-size: clamp(24px, 4vw, 38px);
-  line-height: 1;
+  line-height: 1.12;
   letter-spacing: -0.04em;
+  text-wrap: balance;
 }
 .agenda-command-copy p {
   max-width: 620px;
   margin: 0;
-  color: rgba(255,247,232,0.72);
+  color: rgba(255,247,232,0.82);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -823,6 +824,28 @@
 .agenda-header-btn,
 .agenda-new-booking-btn {
   min-height: 40px;
+}
+.agenda-command-actions .admin-btn-outline,
+.agenda-command-actions .admin-btn-danger {
+  border-color: rgba(255,247,232,0.28);
+  background: rgba(255,255,255,0.08);
+  color: #fff7e8;
+  box-shadow: 0 16px 30px -26px rgba(20,6,12,0.82);
+}
+.agenda-command-actions .admin-btn-outline:hover:not(:disabled),
+.agenda-command-actions .admin-btn-danger:hover:not(:disabled) {
+  border-color: rgba(255,247,232,0.48);
+  background: rgba(255,255,255,0.14);
+  color: #fff7e8;
+}
+.agenda-command-actions .admin-btn-danger {
+  border-color: rgba(251,113,133,0.34);
+  background: rgba(251,113,133,0.14);
+  color: #ffe5ec;
+}
+.agenda-command-actions .admin-btn-danger:hover:not(:disabled) {
+  border-color: rgba(251,113,133,0.52);
+  background: rgba(251,113,133,0.2);
 }
 .agenda-new-booking-btn {
   box-shadow: 0 14px 28px -20px rgba(212,175,55,0.8);
@@ -886,6 +909,7 @@
 .agenda-board {
   display: grid;
   gap: 14px;
+  align-items: start;
   overflow-x: auto;
   padding-bottom: 4px;
 }
@@ -932,8 +956,17 @@
 .agenda-board-danger header strong { color: #dc2626; }
 .agenda-board-danger header strong { background: rgba(220,38,38,0.1); }
 .agenda-board-warning header { border-top-color: #f59e0b; }
+.agenda-board-warning header span,
+.agenda-board-warning header strong { color: #b45309; }
+.agenda-board-warning header strong { background: rgba(245,158,11,0.12); }
 .agenda-board-success header { border-top-color: #10b981; }
+.agenda-board-success header span,
+.agenda-board-success header strong { color: #047857; }
+.agenda-board-success header strong { background: rgba(16,185,129,0.12); }
 .agenda-board-done header { border-top-color: #6366f1; }
+.agenda-board-done header span,
+.agenda-board-done header strong { color: #4f46e5; }
+.agenda-board-done header strong { background: rgba(99,102,241,0.12); }
 .agenda-column-scroll {
   display: flex;
   flex-direction: column;
@@ -961,7 +994,8 @@
   border: 1px solid var(--admin-border);
   box-shadow: 0 12px 28px -26px rgba(58,10,30,0.6);
   display: grid;
-  gap: 10px;
+  gap: 12px;
+  align-content: start;
   transition: transform var(--admin-transition), border-color var(--admin-transition), box-shadow var(--admin-transition);
 }
 .agenda-booking-card:hover {
@@ -988,7 +1022,7 @@
 .agenda-booking-static,
 .agenda-booking-hover-panel {
   display: grid;
-  gap: 10px;
+  gap: 12px;
 }
 .agenda-card-topline {
   justify-content: space-between;
@@ -1057,7 +1091,7 @@
 .agenda-card-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  gap: 8px;
 }
 .agenda-card-meta-grid div {
   min-width: 0;
@@ -1116,9 +1150,7 @@
   overflow-wrap: anywhere;
 }
 .agenda-card-mini-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  display: none;
 }
 .agenda-card-mini-grid div {
   border: 1px solid var(--admin-border);
@@ -1151,6 +1183,8 @@
 .agenda-card-actions {
   flex-wrap: wrap;
   gap: 6px;
+  padding-top: 2px;
+  border-top: 1px solid rgba(58,10,30,0.08);
 }
 .agenda-card-actions button {
   min-height: 30px;
@@ -1172,22 +1206,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .agenda-booking-card {
-    min-height: 168px;
-  }
-
-  .agenda-booking-hover-panel {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transform: translateY(-6px);
-    transition: max-height 0.22s ease, opacity 0.18s ease, transform 0.18s ease;
-  }
-
-  .agenda-booking-card:hover .agenda-booking-hover-panel,
-  .agenda-booking-card:focus-within .agenda-booking-hover-panel {
-    max-height: 460px;
-    opacity: 1;
-    transform: translateY(0);
+    min-height: 0;
   }
 }
 
@@ -1230,8 +1249,9 @@
   margin: 7px 0 5px;
   color: #fff7e8;
   font-size: clamp(22px, 3vw, 32px);
-  line-height: 1;
+  line-height: 1.1;
   letter-spacing: -0.03em;
+  text-wrap: balance;
 }
 .agenda-create-header p {
   margin: 0;

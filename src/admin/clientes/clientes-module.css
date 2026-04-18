@@ -90,13 +90,14 @@
   margin: 10px 0 8px;
   color: #fff7e8;
   font-size: clamp(24px, 3vw, 34px);
-  line-height: 1.04;
+  line-height: 1.12;
   font-weight: 900;
+  text-wrap: balance;
 }
 
 .clientes-command-copy p {
   margin: 0;
-  color: rgba(255, 247, 232, 0.72);
+  color: rgba(255, 247, 232, 0.82);
   font-size: 13px;
   line-height: 1.65;
 }
@@ -108,6 +109,21 @@
   flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.clientes-command-actions .admin-btn-outline,
+.clientes-modal-actions .admin-btn-outline {
+  border-color: rgba(255, 247, 232, 0.28);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff7e8;
+  box-shadow: 0 16px 30px -26px rgba(20, 6, 12, 0.82);
+}
+
+.clientes-command-actions .admin-btn-outline:hover:not(:disabled),
+.clientes-modal-actions .admin-btn-outline:hover:not(:disabled) {
+  border-color: rgba(255, 247, 232, 0.48);
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff7e8;
 }
 
 .clientes-command-metrics {
@@ -910,14 +926,15 @@
   margin: 0;
   color: #fff7e8;
   font-size: clamp(24px, 3vw, 32px);
-  line-height: 1.08;
+  line-height: 1.12;
   white-space: normal;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .clientes-modal-headline .admin-modal-subtitle {
   margin-top: 8px;
-  color: rgba(255, 247, 232, 0.72);
+  color: rgba(255, 247, 232, 0.82);
   max-width: 760px;
 }
 
@@ -939,7 +956,7 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: rgba(255, 247, 232, 0.72);
+  color: rgba(255, 247, 232, 0.84);
   font-size: 12px;
 }
 
@@ -948,6 +965,14 @@
   gap: 10px;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+
+.clientes-command-actions .admin-btn-primary,
+.clientes-modal-actions .admin-btn-primary,
+.clientes-command-actions .admin-btn-outline,
+.clientes-modal-actions .admin-btn-outline {
+  min-height: 42px;
+  padding: 0 16px;
 }
 
 .clientes-modal-kpis {
@@ -985,7 +1010,7 @@
   width: 100%;
   min-width: 0;
   line-height: 1.15;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .clientes-modal-tabs button.active {
@@ -1601,9 +1626,9 @@
 
 .status-pending,
 .task-pending {
-  color: #ffe2a6;
-  background: rgba(255, 187, 77, 0.14);
-  border-color: rgba(255, 187, 77, 0.2);
+  color: #9a5b00;
+  background: rgba(245, 158, 11, 0.16);
+  border-color: rgba(245, 158, 11, 0.28);
 }
 
 .status-confirmed,
@@ -1611,17 +1636,17 @@
 .event-queued,
 .event-sent,
 .task-done {
-  color: #b7ffd4;
-  background: rgba(84, 206, 131, 0.14);
-  border-color: rgba(84, 206, 131, 0.2);
+  color: #0f6a49;
+  background: rgba(16, 185, 129, 0.14);
+  border-color: rgba(16, 185, 129, 0.26);
 }
 
 .status-rejected,
 .event-skipped,
 .event-failed {
-  color: #ffbcbc;
-  background: rgba(255, 108, 108, 0.14);
-  border-color: rgba(255, 108, 108, 0.2);
+  color: #b42318;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.24);
 }
 
 .event-canceled {
@@ -1631,14 +1656,14 @@
 }
 
 .admin-btn-danger-soft {
-  border-color: rgba(255, 108, 108, 0.18);
-  color: #ffd1d1;
-  background: rgba(255, 108, 108, 0.08);
+  border-color: rgba(255, 108, 108, 0.28);
+  color: #ffe0e3;
+  background: rgba(255, 108, 108, 0.12);
 }
 
 .admin-btn-danger-soft:hover {
-  border-color: rgba(255, 108, 108, 0.28);
-  background: rgba(255, 108, 108, 0.12);
+  border-color: rgba(255, 108, 108, 0.42);
+  background: rgba(255, 108, 108, 0.18);
 }
 
 @media (hover: hover) and (pointer: fine) {
