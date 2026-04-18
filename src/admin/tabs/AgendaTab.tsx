@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   CalendarPlus,
@@ -56,6 +57,13 @@ type AvailabilityState = {
   loading: boolean;
   error: string;
   limitReached: boolean;
+};
+
+type ExpandedAgendaPanel = {
+  bookingId: number;
+  top: number;
+  left: number;
+  width: number;
 };
 
 const AGENDA_TIME_SLOTS = [
@@ -189,8 +197,9 @@ export function AgendaTab({
   const [submitting, setSubmitting] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
-  const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
+  const [expandedPanel, setExpandedPanel] = useState<ExpandedAgendaPanel | null>(null);
   const [scrollingColumns, setScrollingColumns] = useState<Record<string, boolean>>({});
+  const panelCloseTimer = useRef<number | null>(null);
   const columnScrollTimers = useRef<Record<string, number>>({});
   const [availability, setAvailability] = useState<AvailabilityState>({
     busySlots: [],
@@ -198,6 +207,7 @@ export function AgendaTab({
     error: '',
     limitReached: false,
   });
+  const expandedBookingId = expandedPanel?.bookingId ?? null;
 
   const collaborators = useMemo(
     () => professionals
@@ -261,6 +271,42 @@ export function AgendaTab({
     [createForm.clientId, sortedClients],
   );
 
+  const cancelClosePanel = () => {
+    if (typeof panelCloseTimer.current === 'number') {
+      window.clearTimeout(panelCloseTimer.current);
+      panelCloseTimer.current = null;
+    }
+  };
+
+  const closeExpandedPanel = () => {
+    cancelClosePanel();
+    setExpandedPanel(null);
+  };
+
+  const scheduleClosePanel = () => {
+    cancelClosePanel();
+    panelCloseTimer.current = window.setTimeout(() => {
+      setExpandedPanel(null);
+      panelCloseTimer.current = null;
+    }, 120);
+  };
+
+  const getExpandedPanelLayout = (card: HTMLDivElement): Omit<ExpandedAgendaPanel, 'bookingId'> => {
+    const rect = card.getBoundingClientRect();
+    const viewportPadding = 16;
+    const gap = 14;
+    const maxWidth = Math.min(360, window.innerWidth - (viewportPadding * 2));
+    const minWidth = Math.min(320, maxWidth);
+    const width = Math.max(minWidth, Math.min(360, Math.round(window.innerWidth * 0.24)));
+    const fitsRight = rect.right + gap + width <= window.innerWidth - viewportPadding;
+    const left = fitsRight
+      ? Math.min(rect.right + gap, window.innerWidth - width - viewportPadding)
+      : Math.max(viewportPadding, rect.left - width - gap);
+    const top = Math.max(viewportPadding, Math.min(rect.top, window.innerHeight - 540));
+
+    return { top, left, width };
+  };
+
   const revealExpandedCard = (card: HTMLDivElement | null) => {
     if (!card || typeof window === 'undefined') return;
 
@@ -285,7 +331,17 @@ export function AgendaTab({
   };
 
   const handleExpandBooking = (bookingId: number, card: HTMLDivElement | null) => {
-    setExpandedBookingId(bookingId);
+    cancelClosePanel();
+    if (card) {
+      setExpandedPanel({ bookingId, ...getExpandedPanelLayout(card) });
+    } else {
+      setExpandedPanel((current) => (current?.bookingId === bookingId ? current : {
+        bookingId,
+        top: 96,
+        left: 16,
+        width: Math.min(360, window.innerWidth - 32),
+      }));
+    }
     revealExpandedCard(card);
   };
 
@@ -314,19 +370,37 @@ export function AgendaTab({
     const card = document.querySelector(`.agenda-booking-card[data-booking-id="${expandedBookingId}"]`);
     if (!(card instanceof HTMLDivElement)) return undefined;
 
+    setExpandedPanel((current) => (current?.bookingId === expandedBookingId
+      ? { bookingId: expandedBookingId, ...getExpandedPanelLayout(card) }
+      : current));
     revealExpandedCard(card);
 
-    const followUp = window.setTimeout(() => revealExpandedCard(card), 110);
-    const settle = window.setTimeout(() => revealExpandedCard(card), 220);
+    const syncLayout = () => {
+      setExpandedPanel((current) => (current?.bookingId === expandedBookingId
+        ? { bookingId: expandedBookingId, ...getExpandedPanelLayout(card) }
+        : current));
+      revealExpandedCard(card);
+    };
+
+    const followUp = window.setTimeout(syncLayout, 110);
+    const settle = window.setTimeout(syncLayout, 220);
+
+    window.addEventListener('resize', syncLayout);
+    window.addEventListener('scroll', syncLayout, true);
 
     return () => {
       window.clearTimeout(followUp);
       window.clearTimeout(settle);
+      window.removeEventListener('resize', syncLayout);
+      window.removeEventListener('scroll', syncLayout, true);
     };
   }, [expandedBookingId]);
 
   useEffect(() => {
     return () => {
+      if (typeof panelCloseTimer.current === 'number') {
+        window.clearTimeout(panelCloseTimer.current);
+      }
       (Object.values(columnScrollTimers.current) as number[]).forEach((timer) => window.clearTimeout(timer));
     };
   }, []);
@@ -503,12 +577,119 @@ export function AgendaTab({
     }
   };
 
-  const renderBookingCard = (booking: AdminBooking, showOverdueAlert?: boolean) => {
+  const renderBookingPanelContent = (booking: AdminBooking, showOverdueAlert?: boolean) => {
     const schedule = rescheduleMap[booking.id] || { date: booking.date, time: booking.time };
     const busy = busyBookingId === booking.id;
-    const statusKey = showOverdueAlert ? 'overdue' : booking.status;
     const hasCollaborator = Boolean(booking.professionalId && booking.professionalName);
     const canEditCollaborator = booking.status !== 'completed' && booking.status !== 'rejected';
+    const serviceItems = extractBookingServiceItems(booking);
+
+    return (
+      <div className="agenda-booking-hover-panel">
+        <div className="agenda-card-meta-grid">
+          <div>
+            <span>Data</span>
+            <strong>{formatDateBR(booking.date)}</strong>
+          </div>
+          <div>
+            <span>Hora</span>
+            <strong>{booking.time}</strong>
+          </div>
+          <div>
+            <span>Valor</span>
+            <strong>{booking.servicePrice || 'Sob consulta'}</strong>
+          </div>
+          <div>
+            <span>Colaborador</span>
+            <strong>{booking.professionalName || 'Nao definido'}</strong>
+          </div>
+        </div>
+
+        <div className="agenda-phone-line">
+          <Phone style={{ width: 12, height: 12 }} /> {booking.phone}
+        </div>
+
+        {serviceItems.length > 0 && (
+          <div className="agenda-selected-services agenda-inline-services">
+            {serviceItems.map((service) => (
+              <button key={`${booking.id}-${service.name}`} type="button" disabled>
+                <span>{service.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="agenda-assignee-panel">
+          <label className="admin-label">Colaborador responsavel</label>
+          <select
+            className="admin-input"
+            value={booking.professionalId ? String(booking.professionalId) : ''}
+            onChange={(event) => { void onAssignProfessional(booking, event.target.value ? Number(event.target.value) : null); }}
+            disabled={busy || !canEditCollaborator}
+          >
+            <option value="" disabled={booking.status !== 'pending'}>{booking.status === 'pending' ? 'Selecionar colaborador' : 'Colaborador obrigatorio'}</option>
+            {availableCollaborators.map((collaborator) => (
+              <option key={collaborator.id} value={collaborator.id}>
+                {collaborator.name}
+              </option>
+            ))}
+          </select>
+          <small className={`agenda-assignee-help ${hasCollaborator ? 'ok' : 'warning'}`}>
+            {hasCollaborator ? `Responsavel atual: ${booking.professionalName}` : 'Obrigatorio para sair de pendente.'}
+          </small>
+        </div>
+
+        {!hasCollaborator && booking.status === 'pending' && (
+          <div className="agenda-booking-warning">
+            <AlertTriangle style={{ width: 12, height: 12 }} /> selecione o colaborador antes de confirmar ou finalizar
+          </div>
+        )}
+
+        {booking.status !== 'completed' && (
+          <div className="agenda-reschedule-row">
+            <input
+              type="date"
+              className="admin-input-sm"
+              value={schedule.date}
+              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, date: event.target.value } }))}
+            />
+            <input
+              type="time"
+              className="admin-input-sm"
+              value={schedule.time}
+              onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, time: event.target.value } }))}
+            />
+          </div>
+        )}
+
+        <div className="agenda-card-actions">
+          {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline">Remarcar</button>}
+          {booking.status !== 'confirmed' && booking.status !== 'completed' && (
+            <button disabled={busy || !hasCollaborator} onClick={() => void onConfirm(booking)} className="admin-btn-success">
+              <CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar
+            </button>
+          )}
+          {(booking.status === 'confirmed' || isOverdue(booking) || showOverdueAlert) && (
+            <button disabled={busy || !hasCollaborator} onClick={() => void onComplete(booking)} className="admin-btn-primary">
+              <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
+            </button>
+          )}
+          {booking.status !== 'rejected' && booking.status !== 'completed' && (
+            <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
+              <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
+            </button>
+          )}
+          <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
+            <Trash2 style={{ width: 12, height: 12 }} /> Excluir
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderBookingCard = (booking: AdminBooking, showOverdueAlert?: boolean) => {
+    const statusKey = showOverdueAlert ? 'overdue' : booking.status;
+    const hasCollaborator = Boolean(booking.professionalId && booking.professionalName);
     const serviceItems = extractBookingServiceItems(booking);
     const leadService = serviceItems[0]?.name || booking.service;
     const additionalServices = Math.max(0, serviceItems.length - 1);
@@ -519,16 +700,13 @@ export function AgendaTab({
         key={booking.id}
         className={`agenda-booking-card agenda-booking-card-${statusKey} ${isExpanded ? 'is-expanded' : ''}`}
         data-booking-id={booking.id}
-        aria-busy={busy}
+        aria-busy={busyBookingId === booking.id}
         tabIndex={0}
         onMouseEnter={(event) => handleExpandBooking(booking.id, event.currentTarget)}
         onPointerEnter={(event) => handleExpandBooking(booking.id, event.currentTarget)}
         onFocus={(event) => handleExpandBooking(booking.id, event.currentTarget)}
-        onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-            setExpandedBookingId((current) => (current === booking.id ? null : current));
-          }
-        }}
+        onMouseLeave={scheduleClosePanel}
+        onBlur={scheduleClosePanel}
       >
         <div className="agenda-booking-static">
           <div className="agenda-card-topline">
@@ -552,121 +730,16 @@ export function AgendaTab({
             </div>
           </div>
 
-          <div className="agenda-card-quickline">
+          <div className="agenda-card-service-line">
             <strong>{leadService}</strong>
-            <span>
-              {hasCollaborator
-                ? `Com ${booking.professionalName}`
-                : booking.status === 'pending'
-                  ? 'Aguardando colaborador para sair do pendente'
-                  : 'Sem colaborador vinculado'}
-            </span>
+            {additionalServices > 0 && <span>+{additionalServices} servicos</span>}
           </div>
 
           <div className="agenda-card-tags">
             <span>{formatDateBR(booking.date)}</span>
             <span>{booking.time}</span>
             {hasCollaborator && <span>{booking.professionalName}</span>}
-          </div>
-        </div>
-
-        <div className="agenda-booking-hover-panel">
-          <div className="agenda-card-meta-grid">
-            <div>
-              <span>Data</span>
-              <strong>{formatDateBR(booking.date)}</strong>
-            </div>
-            <div>
-              <span>Hora</span>
-              <strong>{booking.time}</strong>
-            </div>
-            <div>
-              <span>Valor</span>
-              <strong>{booking.servicePrice || 'Sob consulta'}</strong>
-            </div>
-            <div>
-              <span>Colaborador</span>
-              <strong>{booking.professionalName || 'Nao definido'}</strong>
-            </div>
-          </div>
-
-          <div className="agenda-phone-line">
-            <Phone style={{ width: 12, height: 12 }} /> {booking.phone}
-          </div>
-
-          {serviceItems.length > 0 && (
-            <div className="agenda-selected-services agenda-inline-services">
-              {serviceItems.map((service) => (
-                <button key={`${booking.id}-${service.name}`} type="button" disabled>
-                  <span>{service.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="agenda-assignee-panel">
-            <label className="admin-label">Colaborador responsavel</label>
-            <select
-              className="admin-input"
-              value={booking.professionalId ? String(booking.professionalId) : ''}
-              onChange={(event) => { void onAssignProfessional(booking, event.target.value ? Number(event.target.value) : null); }}
-              disabled={busy || !canEditCollaborator}
-            >
-              <option value="" disabled={booking.status !== 'pending'}>{booking.status === 'pending' ? 'Selecionar colaborador' : 'Colaborador obrigatorio'}</option>
-              {availableCollaborators.map((collaborator) => (
-                <option key={collaborator.id} value={collaborator.id}>
-                  {collaborator.name}
-                </option>
-              ))}
-            </select>
-            <small className={`agenda-assignee-help ${hasCollaborator ? 'ok' : 'warning'}`}>
-              {hasCollaborator ? `Responsavel atual: ${booking.professionalName}` : 'Obrigatorio para sair de pendente.'}
-            </small>
-          </div>
-
-          {!hasCollaborator && booking.status === 'pending' && (
-            <div className="agenda-booking-warning">
-              <AlertTriangle style={{ width: 12, height: 12 }} /> selecione o colaborador antes de confirmar ou finalizar
-            </div>
-          )}
-
-          {booking.status !== 'completed' && (
-            <div className="agenda-reschedule-row">
-              <input
-                type="date"
-                className="admin-input-sm"
-                value={schedule.date}
-                onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, date: event.target.value } }))}
-              />
-              <input
-                type="time"
-                className="admin-input-sm"
-                value={schedule.time}
-                onChange={(event) => setRescheduleMap((current) => ({ ...current, [booking.id]: { ...schedule, time: event.target.value } }))}
-              />
-            </div>
-          )}
-
-          <div className="agenda-card-actions">
-            {booking.status !== 'completed' && <button disabled={busy} onClick={() => void onReschedule(booking)} className="admin-btn-outline">Remarcar</button>}
-            {booking.status !== 'confirmed' && booking.status !== 'completed' && (
-              <button disabled={busy || !hasCollaborator} onClick={() => void onConfirm(booking)} className="admin-btn-success">
-                <CheckCircle2 style={{ width: 12, height: 12 }} /> Confirmar
-              </button>
-            )}
-            {(booking.status === 'confirmed' || isOverdue(booking)) && (
-              <button disabled={busy || !hasCollaborator} onClick={() => void onComplete(booking)} className="admin-btn-primary">
-                <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
-              </button>
-            )}
-            {booking.status !== 'rejected' && booking.status !== 'completed' && (
-              <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
-                <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
-              </button>
-            )}
-            <button disabled={busy} onClick={() => void onDelete(booking)} className="admin-btn-outline agenda-delete-btn">
-              <Trash2 style={{ width: 12, height: 12 }} /> Excluir
-            </button>
+            {!hasCollaborator && <span>Sem colaborador</span>}
           </div>
         </div>
       </div>
@@ -679,6 +752,10 @@ export function AgendaTab({
     { key: 'confirmed', label: 'Confirmados', tone: 'success', items: confirmed, overdue: false },
     { key: 'completed', label: 'Finalizados', tone: 'done', items: completed, overdue: false },
   ];
+  const expandedBooking = expandedBookingId !== null
+    ? bookings.find((booking) => booking.id === expandedBookingId) || null
+    : null;
+  const expandedBookingOverdue = expandedBookingId !== null && overdue.some((booking) => booking.id === expandedBookingId);
 
   return (
     <div className="agenda-page-shell">
@@ -741,14 +818,6 @@ export function AgendaTab({
               <div
                 className={`agenda-column-scroll ${scrollingColumns[column.key] ? 'is-scrolling' : ''}`}
                 onScroll={() => handleColumnScroll(column.key)}
-                onMouseLeave={() => setExpandedBookingId((current) => {
-                  const visibleIds = new Set(column.items.map((item) => item.id));
-                  return current !== null && visibleIds.has(current) ? null : current;
-                })}
-                onPointerLeave={() => setExpandedBookingId((current) => {
-                  const visibleIds = new Set(column.items.map((item) => item.id));
-                  return current !== null && visibleIds.has(current) ? null : current;
-                })}
               >
                 {column.items.length === 0 ? (
                   <div className="agenda-empty-column">Nenhum agendamento nesta etapa.</div>
@@ -759,6 +828,33 @@ export function AgendaTab({
             </section>
           ))}
         </div>
+      )}
+
+      {expandedPanel && expandedBooking && typeof document !== 'undefined' && createPortal(
+        <div
+          className="agenda-booking-flyout"
+          style={{ top: expandedPanel.top, left: expandedPanel.left, width: expandedPanel.width }}
+          onMouseEnter={cancelClosePanel}
+          onMouseLeave={closeExpandedPanel}
+          onFocusCapture={cancelClosePanel}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+              scheduleClosePanel();
+            }
+          }}
+        >
+          <div className="agenda-booking-flyout-head">
+            <div>
+              <span className="agenda-flyout-kicker">{expandedBookingOverdue ? 'Atrasado' : STATUS_LABELS[expandedBooking.status]}</span>
+              <strong>{expandedBooking.name}</strong>
+            </div>
+            <button type="button" className="agenda-flyout-close" onClick={closeExpandedPanel} aria-label="Fechar painel">
+              <X style={{ width: 16, height: 16 }} />
+            </button>
+          </div>
+          {renderBookingPanelContent(expandedBooking, expandedBookingOverdue)}
+        </div>,
+        document.body,
       )}
 
       <DangerConfirmModal

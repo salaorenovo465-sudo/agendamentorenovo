@@ -1034,15 +1034,16 @@
 }
 .agenda-booking-card {
   position: relative;
-  padding: 12px;
-  border-radius: 18px;
+  padding: 10px;
+  border-radius: 16px;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
   box-shadow: 0 12px 28px -26px rgba(58,10,30,0.6);
   display: grid;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
-  transition: transform var(--admin-transition), border-color var(--admin-transition), box-shadow var(--admin-transition);
+  cursor: pointer;
+  transition: transform var(--admin-transition), border-color var(--admin-transition), box-shadow var(--admin-transition), background var(--admin-transition);
 }
 .agenda-booking-card:hover {
   transform: translateY(-2px);
@@ -1131,8 +1132,32 @@
 .agenda-client-copy span {
   margin-top: 2px;
   color: var(--admin-text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
+}
+.agenda-card-service-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 12px;
+  background: rgba(58,10,30,0.025);
+  border: 1px solid rgba(58,10,30,0.06);
+}
+.agenda-card-service-line strong {
+  min-width: 0;
+  color: var(--admin-text);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.agenda-card-service-line span {
+  flex: 0 0 auto;
+  color: var(--admin-text-muted);
+  font-size: 9.5px;
+  font-weight: 700;
 }
 .agenda-card-meta-grid {
   display: grid;
@@ -1172,45 +1197,21 @@
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
-.agenda-card-quickline {
-  display: grid;
-  gap: 3px;
-  padding: 9px 10px;
-  border-radius: 14px;
-  border: 1px solid var(--admin-border);
-  background: rgba(58,10,30,0.025);
-}
-.agenda-card-quickline strong {
-  color: var(--admin-text);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1.4;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-.agenda-card-quickline span {
-  color: var(--admin-text-muted);
-  font-size: 10.5px;
-  line-height: 1.45;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-
 .agenda-card-tags {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 5px;
 }
 
 .agenda-card-tags span {
   display: inline-flex;
   align-items: center;
-  min-height: 26px;
-  padding: 0 10px;
+  min-height: 24px;
+  padding: 0 8px;
   border-radius: 999px;
   background: var(--admin-accent-glow);
   color: var(--admin-accent);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 700;
   line-height: 1.35;
   white-space: normal;
@@ -1247,38 +1248,101 @@
 }
 
 .agenda-booking-card {
-  min-height: 118px;
+  min-height: 0;
   scroll-margin-block: 14px;
 }
 
 .agenda-booking-hover-panel {
-  display: none;
+  display: grid;
   gap: 6px;
-  padding-top: 7px;
-  margin-top: 2px;
-  border-top: 1px solid rgba(58,10,30,0.08);
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
 }
 
 .agenda-booking-card.is-expanded,
 .agenda-booking-card:hover,
 .agenda-booking-card:focus-within {
   z-index: 2;
+  border-color: rgba(212,175,55,0.32);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(252,247,238,0.94));
 }
 
-.agenda-booking-card.is-expanded .agenda-booking-hover-panel,
-.agenda-booking-card:hover .agenda-booking-hover-panel,
-.agenda-booking-card:focus-within .agenda-booking-hover-panel {
-  display: grid;
+.agenda-booking-flyout {
+  position: fixed;
+  z-index: 1200;
+  max-height: calc(100dvh - 32px);
+  padding: 14px;
+  border-radius: 22px;
+  border: 1px solid rgba(58,10,30,0.14);
+  background:
+    radial-gradient(circle at top right, rgba(212,175,55,0.14), transparent 28%),
+    linear-gradient(180deg, rgba(255,255,255,0.99), rgba(248,243,239,0.98));
+  box-shadow: 0 32px 90px -38px rgba(24,8,16,0.62);
+  overflow-y: auto;
   animation: agenda-hover-panel-in 0.16s ease-out;
 }
 
-.agenda-booking-hover-panel .admin-label {
+.agenda-booking-flyout-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid rgba(58,10,30,0.08);
+}
+
+.agenda-booking-flyout-head div {
+  min-width: 0;
+}
+
+.agenda-flyout-kicker {
+  display: inline-flex;
+  align-items: center;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(58,10,30,0.08);
+  color: var(--admin-accent);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.agenda-booking-flyout-head strong {
+  display: block;
+  color: var(--admin-text);
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1.15;
+}
+
+.agenda-flyout-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 1px solid rgba(58,10,30,0.12);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.82);
+  color: var(--admin-accent);
+  cursor: pointer;
+}
+
+.agenda-flyout-close:hover {
+  background: rgba(58,10,30,0.06);
+}
+
+.agenda-booking-flyout .admin-label {
   margin-bottom: 2px;
   font-size: 10px;
   letter-spacing: 0.06em;
 }
 
-.agenda-booking-hover-panel .admin-input {
+.agenda-booking-flyout .admin-input {
   padding: 7px 10px;
   font-size: 12px;
 }
