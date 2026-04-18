@@ -1205,20 +1205,10 @@
 }
 
 .agenda-booking-hover-panel {
-  max-height: 0;
-  overflow: hidden;
-  opacity: 0;
-  transform: translateY(-6px);
-  padding-top: 0;
-  margin-top: 0;
-  border-top: 1px solid transparent;
-  transition:
-    max-height 0.22s ease,
-    opacity 0.18s ease,
-    transform 0.18s ease,
-    padding-top 0.18s ease,
-    margin-top 0.18s ease,
-    border-color 0.18s ease;
+  display: none;
+  padding-top: 8px;
+  margin-top: 2px;
+  border-top: 1px solid rgba(58,10,30,0.08);
 }
 
 .agenda-booking-card.is-expanded,
@@ -1230,12 +1220,19 @@
 .agenda-booking-card.is-expanded .agenda-booking-hover-panel,
 .agenda-booking-card:hover .agenda-booking-hover-panel,
 .agenda-booking-card:focus-within .agenda-booking-hover-panel {
-  max-height: 440px;
-  opacity: 1;
-  transform: translateY(0);
-  padding-top: 8px;
-  margin-top: 2px;
-  border-top-color: rgba(58,10,30,0.08);
+  display: grid;
+  animation: agenda-hover-panel-in 0.16s ease-out;
+}
+
+@keyframes agenda-hover-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* -- Agenda create modal -- */
