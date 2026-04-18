@@ -25,18 +25,49 @@ const CALENDAR_TIMEZONE = process.env.CALENDAR_TIMEZONE || 'America/Sao_Paulo';
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
 const GOOGLE_CALENDAR_ICS_URL = process.env.GOOGLE_CALENDAR_ICS_URL;
 
+const parseServiceAccountCredentials = (): Record<string, unknown> | null => {
+  const rawJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
+  if (rawJson) {
+    try {
+      return JSON.parse(rawJson) as Record<string, unknown>;
+    } catch (error) {
+      console.warn('Falha ao ler GOOGLE_SERVICE_ACCOUNT_JSON:', error);
+    }
+  }
+
+  const rawBase64 = process.env.GOOGLE_SERVICE_ACCOUNT_BASE64?.trim();
+  if (!rawBase64) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(rawBase64, 'base64').toString('utf8');
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch (error) {
+    console.warn('Falha ao ler GOOGLE_SERVICE_ACCOUNT_BASE64:', error);
+    return null;
+  }
+};
+
 const TZ_OFFSET_HOURS = (() => {
   const offsetStr = process.env.TZ_OFFSET_HOURS;
   const offset = offsetStr ? Number(offsetStr) : -3;
   return Number.isFinite(offset) ? offset : -3;
 })();
 
+const googleServiceAccountCredentials = parseServiceAccountCredentials();
+
 const auth = process.env.GOOGLE_APPLICATION_CREDENTIALS
   ? new google.auth.GoogleAuth({
       keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
       scopes: ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/calendar.events'],
     })
-  : null;
+  : googleServiceAccountCredentials
+    ? new google.auth.GoogleAuth({
+        credentials: googleServiceAccountCredentials,
+        scopes: ['https://www.googleapis.com/auth/calendar', 'https://www.googleapis.com/auth/calendar.events'],
+      })
+    : null;
 
 const calendar = auth ? google.calendar({ version: 'v3', auth }) : null;
 

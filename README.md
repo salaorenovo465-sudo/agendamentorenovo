@@ -35,6 +35,7 @@ Aplicacao React + backend Express para agendamento com:
 
 - Node.js 20+
 - credencial de conta de servico em `service-account-key.json`
+  ou por ambiente (`GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_SERVICE_ACCOUNT_BASE64`)
 
 ## Arquitetura leve
 
@@ -48,6 +49,8 @@ Aplicacao React + backend Express para agendamento com:
 1. Instale dependências:
    `npm install`
 2. Copie `.env.example` para `.env` e ajuste os valores.
+   - Em hospedagens como Render, prefira `GOOGLE_SERVICE_ACCOUNT_JSON` ou `GOOGLE_SERVICE_ACCOUNT_BASE64`
+     para nÃ£o depender de arquivo secreto no filesystem.
 3. Garanta que a agenda foi compartilhada com o e-mail da conta de serviço como **"Fazer alteracoes em eventos"**.
 4. Crie a tabela no Supabase usando `supabase/schema.sql`.
 5. Para WhatsApp com Baileys:
