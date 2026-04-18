@@ -265,6 +265,7 @@ export function useWhatsAppInbox({ adminKey, tenantSlug }: HookProps) {
 
   const handleRealtimeEvent = useCallback((event: AdminInboxRealtimeEvent) => {
     if (event.type === 'heartbeat') return;
+    if (event.type === 'admin-notification') return;
 
     if (event.type === 'message-status') {
       setMessages((current) =>
@@ -469,7 +470,7 @@ export function useWhatsAppInbox({ adminKey, tenantSlug }: HookProps) {
     setActionBookingId(booking.id);
     setPanelError('');
     try {
-      await confirmAdminBooking(booking.id, adminKey);
+      await confirmAdminBooking(booking.id, adminKey, tenantSlug);
       if (selectedId) {
         await Promise.all([loadConversationPanel(selectedId), loadMessages(selectedId), refreshInbox({ silent: true, skipMessages: true })]);
       }
@@ -484,7 +485,7 @@ export function useWhatsAppInbox({ adminKey, tenantSlug }: HookProps) {
     setActionBookingId(bookingId);
     setPanelError('');
     try {
-      await rejectAdminBooking(bookingId, reason, adminKey);
+      await rejectAdminBooking(bookingId, reason, adminKey, tenantSlug);
       if (selectedId) {
         await Promise.all([loadConversationPanel(selectedId), loadMessages(selectedId), refreshInbox({ silent: true, skipMessages: true })]);
       }
@@ -499,7 +500,7 @@ export function useWhatsAppInbox({ adminKey, tenantSlug }: HookProps) {
     setActionBookingId(bookingId);
     setPanelError('');
     try {
-      await rescheduleAdminBooking(bookingId, date, time, adminKey);
+      await rescheduleAdminBooking(bookingId, date, time, adminKey, tenantSlug);
       if (selectedId) {
         await Promise.all([loadConversationPanel(selectedId), loadMessages(selectedId), refreshInbox({ silent: true, skipMessages: true })]);
       }

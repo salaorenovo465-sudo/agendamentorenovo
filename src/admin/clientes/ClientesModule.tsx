@@ -639,7 +639,7 @@ function ClienteModal({
     setAgentError('');
     try {
       const [bookingRows, taskRows] = await Promise.all([
-        clientPhone ? listBookingsByPhoneForAdmin(clientPhone, adminKey) : Promise.resolve([]),
+        clientPhone ? listBookingsByPhoneForAdmin(clientPhone, adminKey, tenantSlug) : Promise.resolve([]),
         listWorkbenchEntityForAdmin('tasks', adminKey),
       ]);
       setBookings(bookingRows);
@@ -1376,8 +1376,9 @@ function ClienteModal({
                         <div className="clientes-inline-actions">
                           <button type="button" className="admin-btn-primary" onClick={() => void handleCreateRule()}>
                             <Send className="w-3.5 h-3.5" />
-                            Programar regra
+                            Agendar recorrencia
                           </button>
+                          <span className="clientes-inline-hint">Agendar salva a recorrencia. Executar agora dispara imediatamente a mensagem pela Evolution.</span>
                         </div>
                       </section>
 
@@ -1454,7 +1455,7 @@ function ClienteModal({
                                   </button>
                                   <button type="button" className="admin-btn-primary" onClick={() => void handleRunRule(rule)} disabled={agentBusyRule === rule.id}>
                                     {agentBusyRule === rule.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                                    Executar
+                                    Executar agora
                                   </button>
                                   <button type="button" className="admin-btn-outline admin-btn-danger-soft" onClick={() => void handleDeleteRule(rule.id)}>
                                     <Trash2 className="w-3.5 h-3.5" />
@@ -1721,7 +1722,7 @@ export default function ClientesModule({ adminKey, tenantSlug }: Props) {
   const loadPortfolioBookings = useCallback(async () => {
     setPortfolioLoading(true);
     try {
-      const rows = await listAdminBookings(adminKey, { scope: 'all' });
+      const rows = await listAdminBookings(adminKey, { scope: 'all' }, tenantSlug);
       setPortfolioBookings(rows);
     } catch (loadError) {
       setPortfolioBookings([]);

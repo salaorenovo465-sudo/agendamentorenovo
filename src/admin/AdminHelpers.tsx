@@ -35,6 +35,9 @@ type Toast = { id: number; message: string; type: ToastType };
 let toastId = 0;
 let toastListener: ((t: Toast[]) => void) | null = null;
 let toasts: Toast[] = [];
+let adminAudioContext: AudioContext | null = null;
+let adminAudioUnlocked = false;
+let lastAdminAlertAt = 0;
 
 function pushToast(message: string, type: ToastType) {
   const t: Toast = { id: ++toastId, message, type };
@@ -46,6 +49,80 @@ export const toast = {
   success: (m: string) => pushToast(m, 'success'),
   error: (m: string) => pushToast(m, 'error'),
   info: (m: string) => pushToast(m, 'info'),
+};
+
+const resolveAdminAudioContext = (): AudioContext | null => {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  if (!adminAudioContext) {
+    adminAudioContext = new AudioContextCtor();
+  }
+
+  return adminAudioContext;
+};
+
+export const primeAdminAudio = async (): Promise<void> => {
+  const context = resolveAdminAudioContext();
+  if (!context) {
+    return;
+  }
+
+  if (context.state === 'suspended') {
+    await context.resume();
+  }
+
+  adminAudioUnlocked = context.state === 'running';
+};
+
+export const playAdminAlertSound = async (): Promise<void> => {
+  const now = Date.now();
+  if (now - lastAdminAlertAt < 1200) {
+    return;
+  }
+
+  const context = resolveAdminAudioContext();
+  if (!context) {
+    return;
+  }
+
+  if (!adminAudioUnlocked || context.state === 'suspended') {
+    try {
+      await primeAdminAudio();
+    } catch {
+      return;
+    }
+  }
+
+  if (context.state !== 'running') {
+    return;
+  }
+
+  lastAdminAlertAt = now;
+
+  const masterGain = context.createGain();
+  masterGain.gain.value = 0.04;
+  masterGain.connect(context.destination);
+
+  const firstTone = context.createOscillator();
+  firstTone.type = 'triangle';
+  firstTone.frequency.value = 880;
+  firstTone.connect(masterGain);
+  firstTone.start();
+  firstTone.stop(context.currentTime + 0.12);
+
+  const secondTone = context.createOscillator();
+  secondTone.type = 'sine';
+  secondTone.frequency.value = 660;
+  secondTone.connect(masterGain);
+  secondTone.start(context.currentTime + 0.15);
+  secondTone.stop(context.currentTime + 0.32);
 };
 
 const iconMap = { success: CheckCircle, error: XCircle, info: Clock };

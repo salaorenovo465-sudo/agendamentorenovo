@@ -28,7 +28,7 @@ export {
   deleteConversationForAdmin,
   startAdminInboxRealtimeStream,
 } from './inboxApi';
-export type { AdminInboxContact, AdminInboxRealtimeEvent } from './inboxApi';
+export type { AdminInboxContact, AdminInboxRealtimeEvent, AdminRealtimeNotification } from './inboxApi';
 
 export {
   assignWhatsappConversationForAdmin,

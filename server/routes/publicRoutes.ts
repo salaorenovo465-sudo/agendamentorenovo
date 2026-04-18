@@ -10,7 +10,8 @@ import {
   fetchBusySlotsFromIcs,
   hasCalendarReadAccess,
 } from '../services/calendarService';
-import { getWhatsappStatus, whatsappConfig } from '../services/whatsappService';
+import { inspectEvolutionIntegration } from '../services/evolutionIntegrationService';
+import { getEvolutionInstanceStatus } from '../services/evolutionInstanceService';
 import {
   notifyCustomerPendingBooking,
   notifySalonNewBooking,
@@ -19,6 +20,20 @@ import { normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}$/;
+const TENANT_REGEX = /^[a-z0-9-]{2,50}$/;
+
+const parseTenantFromQuery = (value: unknown): string | null => {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return null;
+  }
+
+  return TENANT_REGEX.test(normalized) ? normalized : null;
+};
 
 const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
   if (!Array.isArray(value)) {
@@ -98,22 +113,39 @@ const getAvailabilityConstraints = async (date: string): Promise<{
 
 export const publicRoutes = Router();
 
-publicRoutes.get('/integration-status', async (_req, res) => {
-  const calendarReadAccess = await hasCalendarReadAccess();
-  const whatsappStatus = getWhatsappStatus();
+publicRoutes.get('/integration-status', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
 
-  res.json({
-    calendarId: calendarConfig.calendarId,
-    calendarApiConfigured: calendarConfig.hasApiCredentials,
-    calendarIcsConfigured: calendarConfig.hasIcsUrl,
-    whatsappConfigured: whatsappConfig.isConfigured,
-    whatsappProvider: whatsappConfig.isConfigured ? whatsappStatus.provider : null,
-    whatsappConnectionState: whatsappConfig.isConfigured ? whatsappStatus.connectionState : 'disabled',
-    whatsappConnected: whatsappConfig.isConfigured ? whatsappStatus.connected : false,
-    calendarReadAccess,
-    calendarWriteAccess: 'on-confirm',
-    storage: bookingStore.isSupabaseEnabled() ? 'supabase' : 'sqlite-fallback',
-  });
+  try {
+    const [calendarReadAccess, evolutionStatus, evolutionDiagnostics] = await Promise.all([
+      hasCalendarReadAccess(),
+      getEvolutionInstanceStatus(tenant || undefined, { includeQr: false }),
+      inspectEvolutionIntegration(tenant || undefined),
+    ]);
+
+    res.json({
+      calendarId: calendarConfig.calendarId,
+      calendarApiConfigured: calendarConfig.hasApiCredentials,
+      calendarIcsConfigured: calendarConfig.hasIcsUrl,
+      whatsappConfigured: evolutionStatus.configured,
+      whatsappProvider: evolutionStatus.configured ? 'evolution' : null,
+      whatsappConnectionState: evolutionStatus.configured ? evolutionStatus.connectionState : 'disabled',
+      whatsappConnected: evolutionStatus.configured ? evolutionStatus.connected : false,
+      evolutionInstance: evolutionStatus.instanceName,
+      evolutionInstanceFound: evolutionDiagnostics.instanceFound,
+      evolutionReadinessScore: evolutionDiagnostics.readinessScore,
+      evolutionStatus: evolutionDiagnostics.overallStatus,
+      calendarReadAccess,
+      calendarWriteAccess: 'on-confirm',
+      storage: bookingStore.isSupabaseEnabled() ? 'supabase' : 'sqlite-fallback',
+    });
+  } catch (error) {
+    console.error('Erro ao carregar status de integracao publica:', error);
+    return res.status(500).json({ error: 'Erro ao carregar status de integracao.' });
+  }
 });
 
 publicRoutes.get('/availability', async (req, res) => {
@@ -178,6 +210,11 @@ publicRoutes.get('/availability', async (req, res) => {
 });
 
 publicRoutes.post('/bookings', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const { service, servicePrice, date, time, name, phone } = req.body;
   const serviceValue = typeof service === 'string' ? service.trim() : '';
   const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
@@ -256,8 +293,8 @@ publicRoutes.post('/bookings', async (req, res) => {
     }
 
     await Promise.allSettled([
-      notifySalonNewBooking(normalizedBooking),
-      notifyCustomerPendingBooking(normalizedBooking),
+      notifySalonNewBooking(normalizedBooking, tenant || undefined),
+      notifyCustomerPendingBooking(normalizedBooking, tenant || undefined),
     ]);
 
     return res.status(201).json({

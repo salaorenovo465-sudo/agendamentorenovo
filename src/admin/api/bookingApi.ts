@@ -10,6 +10,7 @@ type BookingAvailability = {
 export const listAdminBookings = async (
   adminKey: string,
   filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string },
+  tenantSlug?: string,
 ): Promise<AdminBooking[]> => {
   const params = new URLSearchParams();
   if (filters?.scope === 'all') {
@@ -22,7 +23,7 @@ export const listAdminBookings = async (
   }
 
   const query = params.toString();
-  const url = query ? `/api/admin/bookings?${query}` : '/api/admin/bookings';
+  const url = withTenantQuery(query ? `/api/admin/bookings?${query}` : '/api/admin/bookings', tenantSlug);
   const response = await requestAdmin<{ bookings: AdminBooking[] }>(url, adminKey);
   return response.bookings;
 };
@@ -70,9 +71,10 @@ export const getBookingAvailability = async (date: string): Promise<BookingAvail
 export const createAdminBooking = async (
   payload: AdminCreateBookingPayload,
   adminKey: string,
+  tenantSlug?: string,
 ): Promise<AdminBooking> => {
   const { status: _status, ...bookingPayload } = payload;
-  const response = await requestAdmin<{ booking: AdminBooking; message: string }>('/api/admin/bookings', adminKey, {
+  const response = await requestAdmin<{ booking: AdminBooking; message: string }>(withTenantQuery('/api/admin/bookings', tenantSlug), adminKey, {
     method: 'POST',
     body: JSON.stringify(bookingPayload),
   });
@@ -83,30 +85,31 @@ export const assignProfessionalToAdminBooking = async (
   id: number,
   professionalId: number | null,
   adminKey: string,
+  tenantSlug?: string,
 ): Promise<AdminBooking> => {
-  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/professional`, adminKey, {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/professional`, tenantSlug), adminKey, {
     method: 'POST',
     body: JSON.stringify({ professionalId }),
   });
   return response.booking;
 };
 
-export const completeAdminBooking = async (id: number, adminKey: string): Promise<AdminBooking> => {
-  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/complete`, adminKey, {
+export const completeAdminBooking = async (id: number, adminKey: string, tenantSlug?: string): Promise<AdminBooking> => {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/complete`, tenantSlug), adminKey, {
     method: 'POST',
   });
   return response.booking;
 };
 
-export const confirmAdminBooking = async (id: number, adminKey: string): Promise<AdminBooking> => {
-  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/confirm`, adminKey, {
+export const confirmAdminBooking = async (id: number, adminKey: string, tenantSlug?: string): Promise<AdminBooking> => {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/confirm`, tenantSlug), adminKey, {
     method: 'POST',
   });
   return response.booking;
 };
 
-export const rejectAdminBooking = async (id: number, reason: string, adminKey: string): Promise<AdminBooking> => {
-  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/reject`, adminKey, {
+export const rejectAdminBooking = async (id: number, reason: string, adminKey: string, tenantSlug?: string): Promise<AdminBooking> => {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/reject`, tenantSlug), adminKey, {
     method: 'POST',
     body: JSON.stringify({ reason }),
   });
@@ -118,8 +121,9 @@ export const rescheduleAdminBooking = async (
   date: string,
   time: string,
   adminKey: string,
+  tenantSlug?: string,
 ): Promise<AdminBooking> => {
-  const response = await requestAdmin<{ booking: AdminBooking }>(`/api/admin/bookings/${id}/reschedule`, adminKey, {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/reschedule`, tenantSlug), adminKey, {
     method: 'POST',
     body: JSON.stringify({ date, time }),
   });
@@ -129,9 +133,10 @@ export const rescheduleAdminBooking = async (
 export const listBookingsByPhoneForAdmin = async (
   phone: string,
   adminKey: string,
+  tenantSlug?: string,
 ): Promise<AdminBooking[]> => {
   const response = await requestAdmin<{ bookings: AdminBooking[] }>(
-    `/api/admin/bookings/by-phone/${encodeURIComponent(phone)}`,
+    withTenantQuery(`/api/admin/bookings/by-phone/${encodeURIComponent(phone)}`, tenantSlug),
     adminKey,
     { method: 'GET' },
   );

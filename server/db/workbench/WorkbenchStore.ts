@@ -11,6 +11,7 @@ import {
   LEGACY_SETTINGS_KEY,
   DEFAULT_TENANT_SLUG,
   DEFAULT_TENANT_NAME,
+  TENANT_SETTINGS_PREFIX,
   normalizeTenantSlug,
   normalizeTenantName,
   toIsoNow,
@@ -441,6 +442,32 @@ class WorkbenchStore {
 
     const key = settingsKeyForTenant(tenantSlug || null);
     const data = await this.upsertAppSettingByKey(key, value);
+    return (data?.value_json as Record<string, unknown>) || {};
+  }
+
+  private buildScopedSettingKey(scope: string, tenantSlug?: string): string {
+    const normalizedScope = String(scope || '').trim().toLowerCase();
+    if (!normalizedScope) {
+      throw new Error('Escopo de app_settings invalido.');
+    }
+
+    const normalizedTenant = normalizeTenantSlug(tenantSlug || null);
+    return normalizedTenant
+      ? `${TENANT_SETTINGS_PREFIX}${normalizedTenant}:${normalizedScope}`
+      : `${LEGACY_SETTINGS_KEY}:${normalizedScope}`;
+  }
+
+  async getScopedSetting(scope: string, tenantSlug?: string): Promise<Record<string, unknown>> {
+    await this.ensureTenantBootstrap();
+
+    const row = await this.fetchAppSettingByKey(this.buildScopedSettingKey(scope, tenantSlug));
+    return (row?.value_json as Record<string, unknown>) || {};
+  }
+
+  async saveScopedSetting(scope: string, value: Record<string, unknown>, tenantSlug?: string): Promise<Record<string, unknown>> {
+    await this.ensureTenantBootstrap();
+
+    const data = await this.upsertAppSettingByKey(this.buildScopedSettingKey(scope, tenantSlug), value);
     return (data?.value_json as Record<string, unknown>) || {};
   }
 

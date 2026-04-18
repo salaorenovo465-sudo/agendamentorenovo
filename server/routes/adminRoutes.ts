@@ -429,6 +429,11 @@ adminRoutes.post('/bookings/:id/professional', async (req, res) => {
 });
 
 adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const bookingId = parseBookingId(req.params.id);
   if (!bookingId) {
     return res.status(400).json({ error: 'ID de agendamento inválido.' });
@@ -478,7 +483,7 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
     });
 
     if (updatedBooking) {
-      try { await notifyCustomerConfirmedBooking(updatedBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (confirmacao):', notifErr); }
+      try { await notifyCustomerConfirmedBooking(updatedBooking, tenant || undefined); } catch (notifErr) { console.error('Falha ao notificar cliente (confirmacao):', notifErr); }
 
       if (workbenchStore.isEnabled()) {
         try {
@@ -555,6 +560,11 @@ adminRoutes.get('/bookings/pending-payment', async (_req, res) => {
 });
 
 adminRoutes.post('/bookings/:id/reject', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const bookingId = parseBookingId(req.params.id);
   if (!bookingId) {
     return res.status(400).json({ error: 'ID de agendamento inválido.' });
@@ -584,7 +594,7 @@ adminRoutes.post('/bookings/:id/reject', async (req, res) => {
     });
 
     if (updatedBooking) {
-      try { await notifyCustomerRejectedBooking(updatedBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (rejeicao):', notifErr); }
+      try { await notifyCustomerRejectedBooking(updatedBooking, tenant || undefined); } catch (notifErr) { console.error('Falha ao notificar cliente (rejeicao):', notifErr); }
     }
 
     return res.json({ message: 'Agendamento rejeitado.', booking: updatedBooking });
@@ -625,6 +635,11 @@ adminRoutes.delete('/bookings/:id', async (req, res) => {
 });
 
 adminRoutes.post('/bookings/:id/reschedule', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const bookingId = parseBookingId(req.params.id);
   if (!bookingId) {
     return res.status(400).json({ error: 'ID de agendamento inválido.' });
@@ -685,7 +700,7 @@ adminRoutes.post('/bookings/:id/reschedule', async (req, res) => {
         : updatedSchedule;
 
     if (finalBooking) {
-      try { await notifyCustomerRescheduledBooking(finalBooking); } catch (notifErr) { console.error('Falha ao notificar cliente (remarcacao):', notifErr); }
+      try { await notifyCustomerRescheduledBooking(finalBooking, tenant || undefined); } catch (notifErr) { console.error('Falha ao notificar cliente (remarcacao):', notifErr); }
     }
 
     return res.json({ message: 'Agendamento remarcado com sucesso.', booking: finalBooking });

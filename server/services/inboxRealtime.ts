@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 
 import type { OutgoingDeliveryStatus } from './whatsappDeliveryStatus';
+import type { AdminOperationalNotification } from './adminNotificationService';
 
 type InboxRealtimeEventBase = {
   at: string;
@@ -19,6 +20,10 @@ type PublishableInboxRealtimeEvent =
       type: 'message-status';
       providerMessageId: string;
       status: OutgoingDeliveryStatus;
+    }
+  | {
+      type: 'admin-notification';
+      notification: AdminOperationalNotification;
     }
   | {
       type: 'heartbeat';
@@ -59,6 +64,13 @@ export const publishMessageStatus = (providerMessageId: string, status: Outgoing
     type: 'message-status',
     providerMessageId,
     status,
+  });
+};
+
+export const publishAdminNotification = (notification: AdminOperationalNotification): void => {
+  emitEvent({
+    type: 'admin-notification',
+    notification,
   });
 };
 

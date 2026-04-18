@@ -864,8 +864,17 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
   grid-column: 1 / -1;
+}
+
+.clientes-inline-hint {
+  margin-right: auto;
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(91, 53, 62, 0.72);
+  max-width: 420px;
 }
 
 .clientes-modal-root {

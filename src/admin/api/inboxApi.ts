@@ -8,10 +8,25 @@ import { requestAdmin, withTenantQuery, API_BASE } from './apiCore';
 
 export type AdminInboxContact = { id: number; phone: string; name: string };
 
+export type AdminRealtimeNotification = {
+  id: string;
+  type: 'booking-created';
+  tenantSlug: string;
+  createdAt: string;
+  readAt: string | null;
+  sound: 'booking-alert';
+  title: string;
+  message: string;
+  bookingId: number | null;
+  customerName: string;
+  bookingDate: string | null;
+  bookingTime: string | null;
+};
+
 export type AdminInboxRealtimeEvent =
   | {
       type: 'inbox-updated';
-      reason: 'message-created' | 'thread-read' | 'thread-updated';
+      reason: 'message-created' | 'thread-read' | 'thread-updated' | 'thread-deleted';
       threadId?: number;
       at: string;
     }
@@ -23,6 +38,11 @@ export type AdminInboxRealtimeEvent =
       type: 'message-status';
       providerMessageId: string;
       status: 'sent' | 'delivered' | 'read';
+      at: string;
+    }
+  | {
+      type: 'admin-notification';
+      notification: AdminRealtimeNotification;
       at: string;
     }
   | {

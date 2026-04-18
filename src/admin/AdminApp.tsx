@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './admin.css';
 import {
   BarChart3,
@@ -42,12 +42,13 @@ import {
   rescheduleAdminBooking,
   saveAdminSettings,
   resetFinanceForAdmin,
+  startAdminInboxRealtimeStream,
   updateAdminTenant,
   updateMasterPasswordForAdmin,
   updateWorkbenchEntityForAdmin,
   verifyMasterPasswordForAdmin,
 } from './api';
-import { toast, ToastContainer, RejectModal, useKeyboardShortcuts, triggerConfetti } from './AdminHelpers';
+import { toast, ToastContainer, RejectModal, useKeyboardShortcuts, triggerConfetti, playAdminAlertSound, primeAdminAudio } from './AdminHelpers';
 import PaymentConfirmationTab from './PaymentConfirmationTab';
 import type { AdminBooking, AdminCreateBookingPayload, AdminSettings, AdminTenant, WorkbenchEntity, WorkbenchOverview } from './types';
 import { services as publicServicesOriginal } from '../data/services';
@@ -238,6 +239,7 @@ export default function AdminApp() {
   const [newTenantName, setNewTenantName] = useState('');
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [savingTenant, setSavingTenant] = useState(false);
+  const seenAdminNotificationIdsRef = useRef<Set<string>>(new Set());
 
   const navItems = useMemo(
     () => [
@@ -282,6 +284,7 @@ export default function AdminApp() {
         dateScope === 'all'
           ? { scope: 'all' }
           : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd },
+        activeTenant,
       );
       setBookings(rows);
       setRescheduleMap((current) => {
@@ -304,7 +307,7 @@ export default function AdminApp() {
   const loadAllBookings = async () => {
     if (!adminKey) return;
     try {
-      const rows = await listAdminBookings(adminKey, { scope: 'all' });
+      const rows = await listAdminBookings(adminKey, { scope: 'all' }, activeTenant);
       setAllBookings(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar historico global de agendamentos.');
@@ -412,6 +415,7 @@ export default function AdminApp() {
       setEntityRows(INITIAL_ENTITY_ROWS);
       setBookings([]);
       setAllBookings([]);
+      seenAdminNotificationIdsRef.current = new Set();
       setUnlockedProtectedTabs({});
       setProtectedTabRequest(null);
       setProtectedTabPassword('');
@@ -468,6 +472,59 @@ export default function AdminApp() {
   }, [adminKey, activeTenant]);
 
   useEffect(() => {
+    if (!adminKey || typeof window === 'undefined') {
+      return;
+    }
+
+    const unlockAudio = () => {
+      void primeAdminAudio();
+    };
+
+    window.addEventListener('pointerdown', unlockAudio, { once: true });
+    window.addEventListener('keydown', unlockAudio, { once: true });
+
+    return () => {
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('keydown', unlockAudio);
+    };
+  }, [adminKey]);
+
+  useEffect(() => {
+    if (!adminKey) {
+      return;
+    }
+
+    const stop = startAdminInboxRealtimeStream(
+      adminKey,
+      (event) => {
+        if (event.type !== 'admin-notification') {
+          return;
+        }
+
+        if (event.notification.tenantSlug !== activeTenant) {
+          return;
+        }
+
+        if (seenAdminNotificationIdsRef.current.has(event.notification.id)) {
+          return;
+        }
+
+        seenAdminNotificationIdsRef.current.add(event.notification.id);
+        toast.info(event.notification.message || 'Novo agendamento recebido pela pagina publica.');
+        void playAdminAlertSound();
+        void refreshAll();
+      },
+      (streamError) => {
+        console.error('Erro no stream administrativo:', streamError);
+      },
+    );
+
+    return () => {
+      stop();
+    };
+  }, [adminKey, activeTenant, refreshAll]);
+
+  useEffect(() => {
     if (!activeTenant) {
       return;
     }
@@ -507,6 +564,7 @@ export default function AdminApp() {
     setEntityRows(INITIAL_ENTITY_ROWS);
     setBookings([]);
     setAllBookings([]);
+    seenAdminNotificationIdsRef.current = new Set();
     setUnlockedProtectedTabs({});
     setProtectedTabRequest(null);
     setProtectedTabPassword('');
@@ -602,7 +660,7 @@ export default function AdminApp() {
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await confirmAdminBooking(booking.id, adminKey);
+        await confirmAdminBooking(booking.id, adminKey, activeTenant);
       });
       toast.success('Agendamento confirmado!');
       triggerConfetti();
@@ -620,7 +678,7 @@ export default function AdminApp() {
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await completeAdminBooking(booking.id, adminKey);
+        await completeAdminBooking(booking.id, adminKey, activeTenant);
       });
       toast.success('Serviço finalizado!');
     } catch (err) {
@@ -644,7 +702,7 @@ export default function AdminApp() {
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await rejectAdminBooking(booking.id, reason, adminKey);
+        await rejectAdminBooking(booking.id, reason, adminKey, activeTenant);
       });
       toast.info('Agendamento rejeitado.');
     } catch (err) {
@@ -683,7 +741,7 @@ export default function AdminApp() {
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await rescheduleAdminBooking(booking.id, schedule.date, schedule.time, adminKey);
+        await rescheduleAdminBooking(booking.id, schedule.date, schedule.time, adminKey, activeTenant);
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao remarcar agendamento.');
@@ -698,7 +756,7 @@ export default function AdminApp() {
     setError('');
     try {
       await withAgendaRefresh(async () => {
-        await assignProfessionalToAdminBooking(booking.id, professionalId, adminKey);
+        await assignProfessionalToAdminBooking(booking.id, professionalId, adminKey, activeTenant);
       });
       toast.success(professionalId ? 'Colaborador vinculado ao agendamento.' : 'Colaborador removido do agendamento.');
     } catch (err) {
@@ -714,9 +772,9 @@ export default function AdminApp() {
     setError('');
 
     try {
-      const created = await createAdminBooking(payload, adminKey);
+      const created = await createAdminBooking(payload, adminKey, activeTenant);
       if (payload.status === 'confirmed') {
-        await confirmAdminBooking(created.id, adminKey);
+        await confirmAdminBooking(created.id, adminKey, activeTenant);
         triggerConfetti();
       }
 
