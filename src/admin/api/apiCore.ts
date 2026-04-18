@@ -16,12 +16,22 @@ export const withTenantQuery = (path: string, tenantSlug?: string): string => {
   return `${path}${separator}tenant=${encodeURIComponent(tenant)}`;
 };
 
+const withNoCacheQuery = (path: string, method?: string): string => {
+  const normalizedMethod = (method || 'GET').trim().toUpperCase();
+  if (normalizedMethod !== 'GET' && normalizedMethod !== 'HEAD') {
+    return path;
+  }
+
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}_ts=${Date.now()}`;
+};
+
 export const requestAdmin = async <T>(
   path: string,
   adminKey: string,
   options: RequestInit = {},
 ): Promise<T> => {
-  const response = await fetch(apiUrl(path), {
+  const response = await fetch(apiUrl(withNoCacheQuery(path, options.method)), {
     ...options,
     cache: options.cache || 'no-store',
     headers: {
