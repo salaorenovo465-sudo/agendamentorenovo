@@ -1204,42 +1204,40 @@
   line-height: 1.5;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .agenda-booking-card {
-    min-height: 168px;
-  }
+.agenda-booking-card {
+  min-height: 168px;
+}
 
-  .agenda-booking-hover-panel {
-    max-height: 0;
-    overflow: hidden;
-    opacity: 0;
-    transform: translateY(-6px);
-    padding-top: 0;
-    margin-top: 0;
-    border-top: 1px solid transparent;
-    transition:
-      max-height 0.24s ease,
-      opacity 0.18s ease,
-      transform 0.18s ease,
-      padding-top 0.18s ease,
-      margin-top 0.18s ease,
-      border-color 0.18s ease;
-  }
+.agenda-booking-hover-panel {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(-6px);
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 1px solid transparent;
+  transition:
+    max-height 0.24s ease,
+    opacity 0.18s ease,
+    transform 0.18s ease,
+    padding-top 0.18s ease,
+    margin-top 0.18s ease,
+    border-color 0.18s ease;
+}
 
-  .agenda-booking-card:hover,
-  .agenda-booking-card:focus-within {
-    z-index: 2;
-  }
+.agenda-booking-card:hover,
+.agenda-booking-card:focus-within {
+  z-index: 2;
+}
 
-  .agenda-booking-card:hover .agenda-booking-hover-panel,
-  .agenda-booking-card:focus-within .agenda-booking-hover-panel {
-    max-height: 540px;
-    opacity: 1;
-    transform: translateY(0);
-    padding-top: 10px;
-    margin-top: 2px;
-    border-top-color: rgba(58,10,30,0.08);
-  }
+.agenda-booking-card:hover .agenda-booking-hover-panel,
+.agenda-booking-card:focus-within .agenda-booking-hover-panel {
+  max-height: 540px;
+  opacity: 1;
+  transform: translateY(0);
+  padding-top: 10px;
+  margin-top: 2px;
+  border-top-color: rgba(58,10,30,0.08);
 }
 
 /* -- Agenda create modal -- */
