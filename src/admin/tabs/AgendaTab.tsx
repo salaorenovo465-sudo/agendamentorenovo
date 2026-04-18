@@ -287,6 +287,23 @@ export function AgendaTab({
     revealExpandedCard(card);
   };
 
+  useEffect(() => {
+    if (expandedBookingId === null || typeof document === 'undefined' || typeof window === 'undefined') return undefined;
+
+    const card = document.querySelector(`.agenda-booking-card[data-booking-id="${expandedBookingId}"]`);
+    if (!(card instanceof HTMLDivElement)) return undefined;
+
+    revealExpandedCard(card);
+
+    const followUp = window.setTimeout(() => revealExpandedCard(card), 110);
+    const settle = window.setTimeout(() => revealExpandedCard(card), 220);
+
+    return () => {
+      window.clearTimeout(followUp);
+      window.clearTimeout(settle);
+    };
+  }, [expandedBookingId]);
+
   const isSlotBusy = (slot: string): boolean => availability.busySlots.includes('all') || availability.busySlots.includes(slot);
   const selectedTimeBusy = isSlotBusy(createForm.time);
   const availableSlotsCount = AGENDA_TIME_SLOTS.filter((slot) => !isSlotBusy(slot)).length;
@@ -474,6 +491,7 @@ export function AgendaTab({
       <div
         key={booking.id}
         className={`agenda-booking-card agenda-booking-card-${statusKey} ${isExpanded ? 'is-expanded' : ''}`}
+        data-booking-id={booking.id}
         aria-busy={busy}
         tabIndex={0}
         onMouseEnter={(event) => handleExpandBooking(booking.id, event.currentTarget)}
