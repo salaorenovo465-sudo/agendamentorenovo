@@ -1,4 +1,5 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { motion } from 'motion/react';
 import './admin.css';
 import {
@@ -243,6 +244,7 @@ export default function AdminApp() {
   const [newTenantSlug, setNewTenantSlug] = useState('');
   const [savingTenant, setSavingTenant] = useState(false);
   const seenAdminNotificationIdsRef = useRef<Set<string>>(new Set());
+  const loginFxRef = useRef<HTMLDivElement | null>(null);
 
   const navItems = useMemo(
     () => [
@@ -268,6 +270,32 @@ export default function AdminApp() {
     profissionais: 'Colaboradores',
     configuracoes: 'Configuracoes',
   }), []);
+
+  const handleLoginPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = loginFxRef.current || event.currentTarget;
+    const rect = target.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+
+    const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
+    const tiltX = ((y - 50) / 50) * -4;
+    const tiltY = ((x - 50) / 50) * 5;
+
+    target.style.setProperty('--login-x', `${x.toFixed(2)}%`);
+    target.style.setProperty('--login-y', `${y.toFixed(2)}%`);
+    target.style.setProperty('--login-tilt-x', `${tiltX.toFixed(2)}deg`);
+    target.style.setProperty('--login-tilt-y', `${tiltY.toFixed(2)}deg`);
+  }, []);
+
+  const handleLoginPointerLeave = useCallback(() => {
+    const target = loginFxRef.current;
+    if (!target) return;
+
+    target.style.setProperty('--login-x', '50%');
+    target.style.setProperty('--login-y', '42%');
+    target.style.setProperty('--login-tilt-x', '0deg');
+    target.style.setProperty('--login-tilt-y', '0deg');
+  }, []);
 
   const protectedTabLabel = protectedTabRequest ? protectedTabs[protectedTabRequest] || 'Area protegida' : 'Area protegida';
   const dateFilterLabel = dateScope === 'all'
@@ -1053,7 +1081,12 @@ export default function AdminApp() {
 
   if (!adminKey) {
     return (
-      <div className="admin-login-bg">
+      <div
+        ref={loginFxRef}
+        className="admin-login-bg"
+        onPointerMove={handleLoginPointerMove}
+        onPointerLeave={handleLoginPointerLeave}
+      >
         <div className="admin-orb admin-orb-1" />
         <div className="admin-orb admin-orb-2" />
         <div className="admin-orb admin-orb-3" />
