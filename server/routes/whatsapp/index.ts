@@ -9,6 +9,10 @@ import { operationalRoutes } from './operationalRoutes';
 
 const router = Router();
 
+router.use(instanceRoutes);
+router.use(conversationRoutes);
+router.use(operationalRoutes);
+router.use(contactRoutes);
 router.use((_req, res, next) => {
   if (!whatsappConfig.isConfigured) {
     return res.status(503).json({ error: 'Integracao de WhatsApp desativada no momento.' });
@@ -16,11 +20,6 @@ router.use((_req, res, next) => {
 
   return next();
 });
-
-router.use(instanceRoutes);
-router.use(conversationRoutes);
 router.use(messageRoutes);
-router.use(operationalRoutes);
-router.use(contactRoutes);
 
 export { router as whatsappRoutes };
