@@ -149,9 +149,27 @@ export const fetchEvolutionInstances = async (baseUrl: string, apiKey: string): 
 };
 
 const matchesConfiguredInstance = (rows: GenericObject[], configuredInstance: string): EvolutionResolvedInstance | null => {
+  const availableInstances = rows.map((entry) => extractEvolutionInstanceName(entry)).filter(Boolean);
+  const configuredRaw = configuredInstance.trim();
   const configuredKey = normalizeInstanceKey(configuredInstance);
   if (!configuredKey) {
     return null;
+  }
+
+  for (const row of rows) {
+    const instanceName = extractEvolutionInstanceName(row);
+    if (!instanceName) {
+      continue;
+    }
+
+    if (instanceName === configuredRaw) {
+      return {
+        instanceName,
+        row,
+        resolution: 'configured',
+        availableInstances,
+      };
+    }
   }
 
   for (const row of rows) {
@@ -165,8 +183,8 @@ const matchesConfiguredInstance = (rows: GenericObject[], configuredInstance: st
       return {
         instanceName,
         row,
-        resolution: instanceName === configuredInstance ? 'configured' : 'trimmed',
-        availableInstances: rows.map((entry) => extractEvolutionInstanceName(entry)).filter(Boolean),
+        resolution: 'trimmed',
+        availableInstances,
       };
     }
   }
