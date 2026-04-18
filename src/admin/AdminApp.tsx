@@ -7,10 +7,15 @@ import {
   BarChart3,
   Bell,
   Calendar,
+  CheckCircle2,
   Clock,
   CreditCard,
+  Database,
+  Eye,
+  EyeOff,
   FileCheck,
   LayoutDashboard,
+  Loader2,
   Lock,
   LogOut,
   Menu,
@@ -21,12 +26,14 @@ import {
   Stethoscope,
   UserCircle2,
   Users,
+  Wifi,
 } from 'lucide-react';
 
 import {
   ADMIN_AUTH_ERROR_EVENT,
   ADMIN_KEY_STORAGE,
   ADMIN_TENANT_STORAGE,
+  API_BASE,
   assignProfessionalToAdminBooking,
   completeAdminBooking,
   createAdminBooking,
@@ -82,6 +89,24 @@ import { ConfiguracoesTab } from './tabs/ConfiguracoesTab';
 import type { ServiceCatalogCategory, ServiceCatalogItem } from './collaboratorUtils';
 
 const ClientesModule = lazy(() => import('./clientes/ClientesModule'));
+
+const LOGIN_ATTEMPT_STORAGE = 'renovo_admin_login_attempts';
+const LOGIN_LOCK_UNTIL_STORAGE = 'renovo_admin_login_lock_until';
+const LOGIN_MAX_ATTEMPTS = 5;
+const LOGIN_LOCK_MS = 60_000;
+
+type LoginSystemStatus = {
+  loading: boolean;
+  apiOnline: boolean | null;
+  evolutionReady: boolean | null;
+  storageLabel: string;
+};
+
+const readStoredNumber = (key: string): number => {
+  if (typeof window === 'undefined') return 0;
+  const parsed = Number(window.localStorage.getItem(key) || '0');
+  return Number.isFinite(parsed) ? parsed : 0;
+};
 
 const cloneServiceCatalog = (catalog: ServiceCatalogCategory[]): ServiceCatalogCategory[] =>
   catalog.map((category) => ({
@@ -194,6 +219,18 @@ export default function AdminApp() {
   const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || '');
   const [adminKeyInput, setAdminKeyInput] = useState('');
   const [error, setError] = useState('');
+  const [loginSubmitting, setLoginSubmitting] = useState(false);
+  const [showAdminKey, setShowAdminKey] = useState(false);
+  const [loginErrorPulse, setLoginErrorPulse] = useState(false);
+  const [loginAttemptCount, setLoginAttemptCount] = useState(() => readStoredNumber(LOGIN_ATTEMPT_STORAGE));
+  const [loginLockUntil, setLoginLockUntil] = useState(() => readStoredNumber(LOGIN_LOCK_UNTIL_STORAGE));
+  const [loginClockTick, setLoginClockTick] = useState(() => Date.now());
+  const [loginSystemStatus, setLoginSystemStatus] = useState<LoginSystemStatus>({
+    loading: true,
+    apiOnline: null,
+    evolutionReady: null,
+    storageLabel: 'Verificando',
+  });
   const [activeTab, setActiveTab] = useState<TabId>('agenda');
   const [unlockedProtectedTabs, setUnlockedProtectedTabs] = useState<Partial<Record<TabId, boolean>>>({});
   const [protectedTabRequest, setProtectedTabRequest] = useState<TabId | null>(null);
@@ -245,6 +282,7 @@ export default function AdminApp() {
   const [savingTenant, setSavingTenant] = useState(false);
   const seenAdminNotificationIdsRef = useRef<Set<string>>(new Set());
   const loginFxRef = useRef<HTMLDivElement | null>(null);
+  const adminKeyInputRef = useRef<HTMLInputElement | null>(null);
 
   const navItems = useMemo(
     () => [
@@ -296,6 +334,41 @@ export default function AdminApp() {
     target.style.setProperty('--login-tilt-x', '0deg');
     target.style.setProperty('--login-tilt-y', '0deg');
   }, []);
+
+  const loginLocked = loginLockUntil > loginClockTick;
+  const loginLockSeconds = Math.max(0, Math.ceil((loginLockUntil - loginClockTick) / 1000));
+  const loginGreeting = useMemo(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Bom dia, equipe Renovo.';
+    if (hour < 18) return 'Boa tarde, equipe Renovo.';
+    return 'Boa noite, equipe Renovo.';
+  }, []);
+
+  const triggerLoginErrorPulse = useCallback(() => {
+    setLoginErrorPulse(false);
+    window.setTimeout(() => setLoginErrorPulse(true), 0);
+    window.setTimeout(() => setLoginErrorPulse(false), 680);
+  }, []);
+
+  const registerLoginFailure = useCallback((message: string) => {
+    const nextAttemptCount = loginAttemptCount + 1;
+
+    if (nextAttemptCount >= LOGIN_MAX_ATTEMPTS) {
+      const lockUntil = Date.now() + LOGIN_LOCK_MS;
+      setLoginAttemptCount(0);
+      setLoginLockUntil(lockUntil);
+      window.localStorage.setItem(LOGIN_ATTEMPT_STORAGE, '0');
+      window.localStorage.setItem(LOGIN_LOCK_UNTIL_STORAGE, String(lockUntil));
+      setError(`Muitas tentativas invalidas. Aguarde ${Math.ceil(LOGIN_LOCK_MS / 1000)} segundos para tentar novamente.`);
+    } else {
+      setLoginAttemptCount(nextAttemptCount);
+      window.localStorage.setItem(LOGIN_ATTEMPT_STORAGE, String(nextAttemptCount));
+      const remaining = LOGIN_MAX_ATTEMPTS - nextAttemptCount;
+      setError(`${message} Restam ${remaining} tentativa(s) antes do bloqueio temporario.`);
+    }
+
+    triggerLoginErrorPulse();
+  }, [loginAttemptCount, triggerLoginErrorPulse]);
 
   const protectedTabLabel = protectedTabRequest ? protectedTabs[protectedTabRequest] || 'Area protegida' : 'Area protegida';
   const dateFilterLabel = dateScope === 'all'
@@ -452,6 +525,8 @@ export default function AdminApp() {
       setProtectedTabPassword('');
       setProtectedTabError('');
       setProtectedTabUnlocking(false);
+      setLoginSubmitting(false);
+      triggerLoginErrorPulse();
       setError(customEvent.detail?.message || 'Sessao administrativa expirada. Informe a chave novamente.');
     };
 
@@ -459,7 +534,75 @@ export default function AdminApp() {
     return () => {
       window.removeEventListener(ADMIN_AUTH_ERROR_EVENT, onAuthError as EventListener);
     };
-  }, []);
+  }, [triggerLoginErrorPulse]);
+
+  useEffect(() => {
+    if (adminKey) return;
+    const timer = window.setTimeout(() => {
+      adminKeyInputRef.current?.focus();
+    }, 180);
+
+    return () => window.clearTimeout(timer);
+  }, [adminKey]);
+
+  useEffect(() => {
+    if (!loginLocked) return;
+    const timer = window.setInterval(() => setLoginClockTick(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [loginLocked]);
+
+  useEffect(() => {
+    if (!loginLocked || loginLockUntil > Date.now()) return;
+
+    setLoginLockUntil(0);
+    setLoginAttemptCount(0);
+    window.localStorage.removeItem(LOGIN_LOCK_UNTIL_STORAGE);
+    window.localStorage.removeItem(LOGIN_ATTEMPT_STORAGE);
+    setError('');
+  }, [loginClockTick, loginLockUntil, loginLocked]);
+
+  useEffect(() => {
+    if (adminKey) return;
+
+    const controller = new AbortController();
+    setLoginSystemStatus((current) => ({ ...current, loading: true }));
+
+    void (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/integration-status?tenant=${encodeURIComponent(activeTenant || DEFAULT_TENANT_SLUG)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+
+        if (!response.ok) {
+          throw new Error(`Status ${response.status}`);
+        }
+
+        const payload = await response.json() as {
+          whatsappConnected?: boolean;
+          evolutionStatus?: string;
+          storage?: string;
+        };
+
+        setLoginSystemStatus({
+          loading: false,
+          apiOnline: true,
+          evolutionReady: payload.whatsappConnected === true || payload.evolutionStatus === 'ready',
+          storageLabel: payload.storage === 'supabase' ? 'Supabase ativo' : payload.storage || 'Storage ativo',
+        });
+      } catch {
+        if (controller.signal.aborted) return;
+        setLoginSystemStatus({
+          loading: false,
+          apiOnline: false,
+          evolutionReady: null,
+          storageLabel: 'Indisponivel',
+        });
+      }
+    })();
+
+    return () => controller.abort();
+  }, [adminKey, activeTenant]);
 
   useEffect(() => {
     if (!adminKey) return;
@@ -563,23 +706,58 @@ export default function AdminApp() {
     sessionStorage.setItem(ADMIN_TENANT_STORAGE, activeTenant);
   }, [activeTenant]);
 
-  const handleLogin = () => {
-    const key = adminKeyInput.trim();
-    if (!key) {
-      setError('Informe a chave administrativa.');
+  const handleLogin = async () => {
+    if (loginSubmitting) {
       return;
     }
 
-    sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
-    setAdminKey(key);
-    setActiveTab('agenda');
-    setDateScope('all');
-    setUnlockedProtectedTabs({});
-    setProtectedTabRequest(null);
-    setProtectedTabPassword('');
-    setProtectedTabError('');
-    setProtectedTabUnlocking(false);
+    if (loginLocked) {
+      setError(`Acesso temporariamente bloqueado. Tente novamente em ${loginLockSeconds} segundo(s).`);
+      triggerLoginErrorPulse();
+      return;
+    }
+
+    const key = adminKeyInput.trim();
+    if (!key) {
+      setError('Informe a chave administrativa.');
+      triggerLoginErrorPulse();
+      return;
+    }
+
+    setLoginSubmitting(true);
     setError('');
+
+    try {
+      const tenantRows = await listAdminTenants(key);
+      const normalizedActive = normalizeTenantSlug(activeTenant) || DEFAULT_TENANT_SLUG;
+      const tenantExists = tenantRows.some((tenant) => tenant.slug === normalizedActive);
+      const nextTenant = tenantExists ? normalizedActive : tenantRows[0]?.slug || DEFAULT_TENANT_SLUG;
+
+      sessionStorage.setItem(ADMIN_KEY_STORAGE, key);
+      sessionStorage.setItem(ADMIN_TENANT_STORAGE, nextTenant);
+      window.localStorage.removeItem(LOGIN_ATTEMPT_STORAGE);
+      window.localStorage.removeItem(LOGIN_LOCK_UNTIL_STORAGE);
+      setLoginAttemptCount(0);
+      setLoginLockUntil(0);
+      setTenants(tenantRows);
+      setActiveTenant(nextTenant);
+      setAdminKey(key);
+      setActiveTab('agenda');
+      setDateScope('all');
+      setUnlockedProtectedTabs({});
+      setProtectedTabRequest(null);
+      setProtectedTabPassword('');
+      setProtectedTabError('');
+      setProtectedTabUnlocking(false);
+      setError('');
+    } catch {
+      sessionStorage.removeItem(ADMIN_KEY_STORAGE);
+      sessionStorage.removeItem(ADMIN_TENANT_STORAGE);
+      setAdminKey('');
+      registerLoginFailure('Chave invalida. Confira o acesso administrativo.');
+    } finally {
+      setLoginSubmitting(false);
+    }
   };
 
   const handleLogout = () => {
@@ -1090,6 +1268,7 @@ export default function AdminApp() {
         <div className="admin-orb admin-orb-1" />
         <div className="admin-orb admin-orb-2" />
         <div className="admin-orb admin-orb-3" />
+        <div className="admin-login-live-lines" aria-hidden="true" />
         <div className="admin-login-grid">
           <motion.section
             className="admin-login-hero"
@@ -1111,10 +1290,10 @@ export default function AdminApp() {
               <Sparkles style={{ width: 15, height: 15 }} />
               Salao, agenda e relacionamento em um unico cockpit
             </span>
-            <h1>Seja bem-vindo a Central de Agendamento Renovo.</h1>
+            <h1>{loginGreeting} Bem-vindo a Central Renovo.</h1>
             <p>
-              Entre no painel para comandar agenda, clientes, recorrencias, pagamentos e integracoes
-              com uma experiencia visual clara, segura e preparada para operacao diaria.
+              Controle sua agenda, encante seus clientes e acompanhe recorrencias, pagamentos e integracoes
+              em um painel preparado para uma operacao moderna e previsivel.
             </p>
 
             <div className="admin-login-highlights">
@@ -1143,7 +1322,7 @@ export default function AdminApp() {
             transition={{ duration: 0.72, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
           >
             <div className="admin-login-panel-glow" />
-            <div className="admin-login-card">
+            <div className={`admin-login-card${loginErrorPulse ? ' admin-login-card-shake' : ''}`}>
               <div className="admin-login-accent" />
               <div className="admin-login-card-inner">
                 <div className="admin-login-card-head">
@@ -1153,7 +1332,7 @@ export default function AdminApp() {
                   <div>
                     <span>Acesso administrativo</span>
                     <h2>Entrar na Central Renovo</h2>
-                    <p>Use sua chave para liberar o painel operacional.</p>
+                    <p>Valide sua chave para liberar a operacao protegida do Estudio Renovo.</p>
                   </div>
                 </div>
 
@@ -1162,20 +1341,64 @@ export default function AdminApp() {
                   <div className="admin-login-input-wrap">
                     <Lock style={{ width: 16, height: 16 }} />
                     <input
+                      ref={adminKeyInputRef}
                       id="admin-access-key"
-                      type="password"
+                      type={showAdminKey ? 'text' : 'password'}
                       value={adminKeyInput}
                       onChange={(event) => setAdminKeyInput(event.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') void handleLogin();
+                      }}
                       className="admin-input admin-login-input"
                       placeholder="Digite sua chave de acesso"
+                      disabled={loginSubmitting || loginLocked}
                     />
+                    <button
+                      type="button"
+                      className="admin-login-eye"
+                      onClick={() => setShowAdminKey((current) => !current)}
+                      aria-label={showAdminKey ? 'Ocultar chave administrativa' : 'Mostrar chave administrativa'}
+                      disabled={loginSubmitting}
+                    >
+                      {showAdminKey ? <EyeOff style={{ width: 16, height: 16 }} /> : <Eye style={{ width: 16, height: 16 }} />}
+                    </button>
                   </div>
-                  <button onClick={handleLogin} className="admin-btn-primary admin-login-submit">
-                    Entrar no painel
-                    <ArrowRight style={{ width: 17, height: 17 }} />
+                  <button
+                    onClick={() => void handleLogin()}
+                    className="admin-btn-primary admin-login-submit"
+                    disabled={loginSubmitting || loginLocked}
+                    aria-busy={loginSubmitting}
+                  >
+                    {loginSubmitting ? (
+                      <>
+                        <Loader2 className="admin-login-spinner" style={{ width: 17, height: 17 }} />
+                        Validando acesso...
+                      </>
+                    ) : loginLocked ? (
+                      `Tente novamente em ${loginLockSeconds}s`
+                    ) : (
+                      <>
+                        Entrar no painel
+                        <ArrowRight style={{ width: 17, height: 17 }} />
+                      </>
+                    )}
                   </button>
                   {error && <p className="admin-login-error">{error}</p>}
+                </div>
+
+                <div className="admin-login-status-grid">
+                  <span className={loginSystemStatus.apiOnline === false ? 'is-offline' : 'is-online'}>
+                    <Wifi style={{ width: 14, height: 14 }} />
+                    {loginSystemStatus.loading ? 'API verificando' : loginSystemStatus.apiOnline ? 'API online' : 'API offline'}
+                  </span>
+                  <span className={loginSystemStatus.evolutionReady === false ? 'is-warning' : 'is-online'}>
+                    <CheckCircle2 style={{ width: 14, height: 14 }} />
+                    {loginSystemStatus.loading ? 'Mensageria verificando' : loginSystemStatus.evolutionReady ? 'Evolution pronta' : 'Evolution pendente'}
+                  </span>
+                  <span className={loginSystemStatus.apiOnline === false ? 'is-offline' : 'is-online'}>
+                    <Database style={{ width: 14, height: 14 }} />
+                    {loginSystemStatus.storageLabel}
+                  </span>
                 </div>
 
                 <div className="admin-login-trust-row">
