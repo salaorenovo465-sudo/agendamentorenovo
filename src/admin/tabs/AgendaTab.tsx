@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import {
   AlertTriangle,
   CalendarPlus,
@@ -190,6 +190,8 @@ export function AgendaTab({
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
   const [expandedBookingId, setExpandedBookingId] = useState<number | null>(null);
+  const [scrollingColumns, setScrollingColumns] = useState<Record<string, boolean>>({});
+  const columnScrollTimers = useRef<Record<string, number>>({});
   const [availability, setAvailability] = useState<AvailabilityState>({
     busySlots: [],
     loading: false,
@@ -287,6 +289,25 @@ export function AgendaTab({
     revealExpandedCard(card);
   };
 
+  const handleColumnScroll = (columnKey: string) => {
+    setScrollingColumns((current) => (current[columnKey] ? current : { ...current, [columnKey]: true }));
+
+    const existingTimer = columnScrollTimers.current[columnKey];
+    if (typeof existingTimer === 'number') {
+      window.clearTimeout(existingTimer);
+    }
+
+    columnScrollTimers.current[columnKey] = window.setTimeout(() => {
+      setScrollingColumns((current) => {
+        if (!current[columnKey]) return current;
+        const next = { ...current };
+        delete next[columnKey];
+        return next;
+      });
+      delete columnScrollTimers.current[columnKey];
+    }, 520);
+  };
+
   useEffect(() => {
     if (expandedBookingId === null || typeof document === 'undefined' || typeof window === 'undefined') return undefined;
 
@@ -303,6 +324,12 @@ export function AgendaTab({
       window.clearTimeout(settle);
     };
   }, [expandedBookingId]);
+
+  useEffect(() => {
+    return () => {
+      (Object.values(columnScrollTimers.current) as number[]).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
 
   const isSlotBusy = (slot: string): boolean => availability.busySlots.includes('all') || availability.busySlots.includes(slot);
   const selectedTimeBusy = isSlotBusy(createForm.time);
@@ -712,7 +739,8 @@ export function AgendaTab({
                 </div>
               </header>
               <div
-                className="agenda-column-scroll"
+                className={`agenda-column-scroll ${scrollingColumns[column.key] ? 'is-scrolling' : ''}`}
+                onScroll={() => handleColumnScroll(column.key)}
                 onMouseLeave={() => setExpandedBookingId((current) => {
                   const visibleIds = new Set(column.items.map((item) => item.id));
                   return current !== null && visibleIds.has(current) ? null : current;
