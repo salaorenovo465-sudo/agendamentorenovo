@@ -12,6 +12,7 @@ import { startClientAgentScheduler } from './server/services/clientAgentService'
 import { initializeWhatsapp } from './server/services/whatsappService';
 
 const app = express();
+app.set('trust proxy', true);
 const port = Number(process.env.PORT || 3001);
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];

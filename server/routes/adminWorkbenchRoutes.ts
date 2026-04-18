@@ -349,13 +349,34 @@ const parseTenantFromQuery = (value: unknown): string | null => {
   return normalized;
 };
 
-const resolveRequestPublicBaseUrl = (req: { protocol?: string; get?: (name: string) => string | undefined }): string | undefined => {
-  const host = req.get ? req.get('host') : undefined;
-  if (!req.protocol || !host) {
+const getHeaderValue = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) {
+    const first = value[0];
+    return typeof first === 'string' ? first.split(',')[0]?.trim() || undefined : undefined;
+  }
+
+  if (typeof value !== 'string') {
     return undefined;
   }
 
-  return `${req.protocol}://${host}`;
+  const normalized = value.split(',')[0]?.trim();
+  return normalized || undefined;
+};
+
+const resolveRequestPublicBaseUrl = (req: {
+  protocol?: string;
+  get?: (name: string) => string | undefined;
+  headers?: Record<string, unknown>;
+}): string | undefined => {
+  const forwardedProto = req.get?.('x-forwarded-proto') || getHeaderValue(req.headers?.['x-forwarded-proto']);
+  const forwardedHost = req.get?.('x-forwarded-host') || getHeaderValue(req.headers?.['x-forwarded-host']);
+  const protocol = forwardedProto || req.protocol;
+  const host = forwardedHost || req.get?.('host') || getHeaderValue(req.headers?.host);
+  if (!protocol || !host) {
+    return undefined;
+  }
+
+  return `${protocol}://${host}`;
 };
 
 const getPayloadString = (payload: Record<string, unknown>, key: string): string =>
