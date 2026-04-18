@@ -450,6 +450,8 @@ export function AgendaTab({
         tabIndex={0}
         onMouseEnter={() => setExpandedBookingId(booking.id)}
         onMouseLeave={() => setExpandedBookingId((current) => (current === booking.id ? null : current))}
+        onPointerEnter={() => setExpandedBookingId(booking.id)}
+        onPointerLeave={() => setExpandedBookingId((current) => (current === booking.id ? null : current))}
         onFocus={() => setExpandedBookingId(booking.id)}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
@@ -490,15 +492,10 @@ export function AgendaTab({
             </span>
           </div>
 
-          <div className="agenda-card-mini-grid">
-            <div>
-              <span>Data</span>
-              <strong>{formatDateBR(booking.date)}</strong>
-            </div>
-            <div>
-              <span>Hora</span>
-              <strong>{booking.time}</strong>
-            </div>
+          <div className="agenda-card-tags">
+            <span>{formatDateBR(booking.date)}</span>
+            <span>{booking.time}</span>
+            {hasCollaborator && <span>{booking.professionalName}</span>}
           </div>
         </div>
 

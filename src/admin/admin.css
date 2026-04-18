@@ -988,13 +988,13 @@
 }
 .agenda-booking-card {
   position: relative;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 12px;
+  border-radius: 18px;
   background: var(--admin-surface);
   border: 1px solid var(--admin-border);
   box-shadow: 0 12px 28px -26px rgba(58,10,30,0.6);
   display: grid;
-  gap: 10px;
+  gap: 8px;
   overflow: hidden;
   transition: transform var(--admin-transition), border-color var(--admin-transition), box-shadow var(--admin-transition);
 }
@@ -1022,7 +1022,7 @@
 .agenda-booking-static,
 .agenda-booking-hover-panel {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 .agenda-card-topline {
   justify-content: space-between;
@@ -1149,31 +1149,27 @@
   white-space: normal;
   overflow-wrap: anywhere;
 }
-.agenda-card-mini-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+
+.agenda-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
-.agenda-card-mini-grid div {
-  border: 1px solid var(--admin-border);
-  border-radius: 12px;
-  background: var(--admin-bg);
-  padding: 9px 10px;
-  display: grid;
-  gap: 4px;
-}
-.agenda-card-mini-grid span {
-  color: var(--admin-text-muted);
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.agenda-card-mini-grid strong {
-  color: var(--admin-text);
-  font-size: 12px;
-  font-weight: 800;
+
+.agenda-card-tags span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--admin-accent-glow);
+  color: var(--admin-accent);
+  font-size: 10px;
+  font-weight: 700;
   line-height: 1.35;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: break-word;
 }
 .agenda-reschedule-row {
   gap: 6px;
@@ -1205,7 +1201,7 @@
 }
 
 .agenda-booking-card {
-  min-height: 168px;
+  min-height: 118px;
 }
 
 .agenda-booking-hover-panel {
@@ -1217,7 +1213,7 @@
   margin-top: 0;
   border-top: 1px solid transparent;
   transition:
-    max-height 0.24s ease,
+    max-height 0.22s ease,
     opacity 0.18s ease,
     transform 0.18s ease,
     padding-top 0.18s ease,
@@ -1234,10 +1230,10 @@
 .agenda-booking-card.is-expanded .agenda-booking-hover-panel,
 .agenda-booking-card:hover .agenda-booking-hover-panel,
 .agenda-booking-card:focus-within .agenda-booking-hover-panel {
-  max-height: 540px;
+  max-height: 440px;
   opacity: 1;
   transform: translateY(0);
-  padding-top: 10px;
+  padding-top: 8px;
   margin-top: 2px;
   border-top-color: rgba(58,10,30,0.08);
 }
