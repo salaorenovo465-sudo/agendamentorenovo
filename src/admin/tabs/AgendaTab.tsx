@@ -259,6 +259,34 @@ export function AgendaTab({
     [createForm.clientId, sortedClients],
   );
 
+  const revealExpandedCard = (card: HTMLDivElement | null) => {
+    if (!card || typeof window === 'undefined') return;
+
+    const column = card.closest('.agenda-column-scroll');
+    if (!(column instanceof HTMLElement)) return;
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const cardRect = card.getBoundingClientRect();
+        const columnRect = column.getBoundingClientRect();
+        const safePadding = 18;
+
+        if (cardRect.bottom > columnRect.bottom - safePadding) {
+          column.scrollTop += cardRect.bottom - columnRect.bottom + safePadding;
+        }
+
+        if (cardRect.top < columnRect.top + safePadding) {
+          column.scrollTop -= columnRect.top - cardRect.top + safePadding;
+        }
+      });
+    });
+  };
+
+  const handleExpandBooking = (bookingId: number, card: HTMLDivElement | null) => {
+    setExpandedBookingId(bookingId);
+    revealExpandedCard(card);
+  };
+
   const isSlotBusy = (slot: string): boolean => availability.busySlots.includes('all') || availability.busySlots.includes(slot);
   const selectedTimeBusy = isSlotBusy(createForm.time);
   const availableSlotsCount = AGENDA_TIME_SLOTS.filter((slot) => !isSlotBusy(slot)).length;
@@ -448,9 +476,9 @@ export function AgendaTab({
         className={`agenda-booking-card agenda-booking-card-${statusKey} ${isExpanded ? 'is-expanded' : ''}`}
         aria-busy={busy}
         tabIndex={0}
-        onMouseEnter={() => setExpandedBookingId(booking.id)}
-        onPointerEnter={() => setExpandedBookingId(booking.id)}
-        onFocus={() => setExpandedBookingId(booking.id)}
+        onMouseEnter={(event) => handleExpandBooking(booking.id, event.currentTarget)}
+        onPointerEnter={(event) => handleExpandBooking(booking.id, event.currentTarget)}
+        onFocus={(event) => handleExpandBooking(booking.id, event.currentTarget)}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
             setExpandedBookingId((current) => (current === booking.id ? null : current));

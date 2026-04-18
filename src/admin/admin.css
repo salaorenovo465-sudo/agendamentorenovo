@@ -918,7 +918,7 @@
   flex-direction: column;
   min-width: 260px;
   min-height: 0;
-  max-height: clamp(460px, calc(100dvh - 230px), 760px);
+  max-height: clamp(560px, calc(100dvh - 185px), 900px);
   border-radius: 18px;
   background:
     linear-gradient(180deg, rgba(255,255,255,0.76), rgba(255,255,255,0.48)),
@@ -978,9 +978,10 @@
   flex-direction: column;
   gap: 10px;
   padding: 10px;
+  padding-bottom: 22px;
   padding-right: 8px;
   max-height: none;
-  min-height: 240px;
+  min-height: 300px;
   overflow-y: auto;
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
@@ -1211,6 +1212,7 @@
 
 .agenda-booking-card {
   min-height: 118px;
+  scroll-margin-block: 14px;
 }
 
 .agenda-booking-hover-panel {
