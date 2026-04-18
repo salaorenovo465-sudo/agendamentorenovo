@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction, type WheelEvent as ReactWheelEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
@@ -340,20 +340,6 @@ export function AgendaTab({
       });
       delete columnScrollTimers.current[columnKey];
     }, 520);
-  };
-
-  const handleColumnWheel = (columnKey: string, event: ReactWheelEvent<HTMLDivElement>) => {
-    const column = event.currentTarget;
-    const hasScrollableContent = column.scrollHeight > column.clientHeight + 1;
-    const isVerticalScroll = Math.abs(event.deltaY) >= Math.abs(event.deltaX);
-
-    if (!hasScrollableContent || !isVerticalScroll) return;
-
-    // Keep wheel scrolling inside the hovered kanban column instead of bubbling to the page.
-    column.scrollTop += event.deltaY;
-    handleColumnScroll(columnKey);
-    event.preventDefault();
-    event.stopPropagation();
   };
 
   useEffect(() => {
@@ -825,7 +811,6 @@ export function AgendaTab({
               <div
                 className={`agenda-column-scroll ${scrollingColumns[column.key] ? 'is-scrolling' : ''}`}
                 onScroll={() => handleColumnScroll(column.key)}
-                onWheel={(event) => handleColumnWheel(column.key, event)}
               >
                 {column.items.length === 0 ? (
                   <div className="agenda-empty-column">Nenhum agendamento nesta etapa.</div>

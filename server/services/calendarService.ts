@@ -168,7 +168,8 @@ export const hasCalendarReadAccess = async (): Promise<boolean> => {
   }
 };
 
-const tzOffsetStr = `${TZ_OFFSET_HOURS >= 0 ? '+' : ''}${String(TZ_OFFSET_HOURS).padStart(2, '0')}:00`;
+const tzOffsetAbs = Math.abs(TZ_OFFSET_HOURS);
+const tzOffsetStr = `${TZ_OFFSET_HOURS >= 0 ? '+' : '-'}${String(tzOffsetAbs).padStart(2, '0')}:00`;
 const buildDayBoundary = (date: string, isEnd: boolean): Date => {
   const time = isEnd ? '23:59:59.999' : '00:00:00';
   return new Date(`${date}T${time}${tzOffsetStr}`);
