@@ -178,6 +178,17 @@ export function ConfiguracoesTab({
     () => getChecklistSummary(integrationDiagnostics?.checklist || []),
     [integrationDiagnostics?.checklist],
   );
+  const availableEvolutionInstances = useMemo(() => {
+    const instances = [
+      ...(integrationDiagnostics?.availableInstances || []),
+      integrationState?.status.instanceName || '',
+      evolutionForm.evolutionInstance,
+    ]
+      .map((value) => value.trim())
+      .filter(Boolean);
+
+    return Array.from(new Set(instances)).sort((left, right) => left.localeCompare(right, 'pt-BR'));
+  }, [evolutionForm.evolutionInstance, integrationDiagnostics?.availableInstances, integrationState?.status.instanceName]);
 
   const integrationConfigured = integrationState?.integration.configured === true;
   const integrationConnected = integrationState?.status.connected === true;
@@ -755,12 +766,32 @@ export function ConfiguracoesTab({
                 </div>
                 <div>
                   <label className="admin-label">Nome da instancia</label>
-                  <input
-                    className="admin-input"
-                    value={evolutionForm.evolutionInstance}
-                    onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionInstance: event.target.value }))}
-                    placeholder="renovo-salao"
-                  />
+                  {availableEvolutionInstances.length > 0 ? (
+                    <select
+                      className="admin-input"
+                      value={evolutionForm.evolutionInstance}
+                      onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionInstance: event.target.value }))}
+                    >
+                      <option value="">Selecione uma instancia</option>
+                      {availableEvolutionInstances.map((instanceName) => (
+                        <option key={instanceName} value={instanceName}>
+                          {instanceName}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      className="admin-input"
+                      value={evolutionForm.evolutionInstance}
+                      onChange={(event) => setEvolutionForm((current) => ({ ...current, evolutionInstance: event.target.value }))}
+                      placeholder="renovo-salao"
+                    />
+                  )}
+                  <small className="settings-field-help">
+                    {availableEvolutionInstances.length > 0
+                      ? 'Escolha uma instancia localizada na sua Evolution. Voce ainda pode criar uma nova pelo botao abaixo.'
+                      : 'Depois de testar a conexao, as instancias encontradas aparecem aqui para selecao.'}
+                  </small>
                 </div>
                 <div>
                   <label className="admin-label">Send Path</label>
@@ -842,12 +873,16 @@ export function ConfiguracoesTab({
                   </div>
                   <div className="settings-instance-pill-row">
                     {integrationDiagnostics.availableInstances.map((instanceName) => (
-                      <span
+                      <button
+                        type="button"
                         key={instanceName}
-                        className={`settings-instance-pill ${instanceName === integrationState?.status.instanceName ? 'active' : ''}`}
+                        className={`settings-instance-pill ${
+                          instanceName === evolutionForm.evolutionInstance || instanceName === integrationState?.status.instanceName ? 'active' : ''
+                        }`}
+                        onClick={() => setEvolutionForm((current) => ({ ...current, evolutionInstance: instanceName }))}
                       >
                         {instanceName}
-                      </span>
+                      </button>
                     ))}
                   </div>
                 </div>

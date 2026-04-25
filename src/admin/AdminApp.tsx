@@ -94,6 +94,7 @@ const LOGIN_ATTEMPT_STORAGE = 'renovo_admin_login_attempts';
 const LOGIN_LOCK_UNTIL_STORAGE = 'renovo_admin_login_lock_until';
 const LOGIN_MAX_ATTEMPTS = 5;
 const LOGIN_LOCK_MS = 60_000;
+const RENOVO_LOGO_SRC = '/logo.jpg';
 
 type LoginSystemStatus = {
   loading: boolean;
@@ -316,13 +317,9 @@ export default function AdminApp() {
 
     const x = Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100));
     const y = Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100));
-    const tiltX = ((y - 50) / 50) * -4;
-    const tiltY = ((x - 50) / 50) * 5;
 
     target.style.setProperty('--login-x', `${x.toFixed(2)}%`);
     target.style.setProperty('--login-y', `${y.toFixed(2)}%`);
-    target.style.setProperty('--login-tilt-x', `${tiltX.toFixed(2)}deg`);
-    target.style.setProperty('--login-tilt-y', `${tiltY.toFixed(2)}deg`);
   }, []);
 
   const handleLoginPointerLeave = useCallback(() => {
@@ -331,8 +328,6 @@ export default function AdminApp() {
 
     target.style.setProperty('--login-x', '50%');
     target.style.setProperty('--login-y', '42%');
-    target.style.setProperty('--login-tilt-x', '0deg');
-    target.style.setProperty('--login-tilt-y', '0deg');
   }, []);
 
   const loginLocked = loginLockUntil > loginClockTick;
@@ -1268,7 +1263,6 @@ export default function AdminApp() {
         <div className="admin-orb admin-orb-1" />
         <div className="admin-orb admin-orb-2" />
         <div className="admin-orb admin-orb-3" />
-        <div className="admin-login-live-lines" aria-hidden="true" />
         <div className="admin-login-grid">
           <motion.section
             className="admin-login-hero"
@@ -1277,9 +1271,7 @@ export default function AdminApp() {
             transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
           >
             <div className="admin-login-brandline">
-              <span className="admin-login-brand-mark">
-                <Stethoscope style={{ width: 26, height: 26 }} />
-              </span>
+              <span className="admin-login-brand-seal">R</span>
               <div>
                 <strong>Estudio Renovo</strong>
                 <small>Central de agendamento inteligente</small>
@@ -1288,7 +1280,7 @@ export default function AdminApp() {
 
             <span className="admin-login-eyebrow">
               <Sparkles style={{ width: 15, height: 15 }} />
-              Salao, agenda e relacionamento em um unico cockpit
+              Agenda, clientes e recorrencia em um unico cockpit
             </span>
             <h1>{loginGreeting} Bem-vindo a Central Renovo.</h1>
             <p>
@@ -1325,6 +1317,9 @@ export default function AdminApp() {
             <div className={`admin-login-card${loginErrorPulse ? ' admin-login-card-shake' : ''}`}>
               <div className="admin-login-accent" />
               <div className="admin-login-card-inner">
+                <div className="admin-login-card-logo">
+                  <img src={RENOVO_LOGO_SRC} alt="Logo Estudio Renovo" />
+                </div>
                 <div className="admin-login-card-head">
                   <div className="admin-login-icon-ring">
                     <Lock style={{ width: 26, height: 26 }} />

@@ -1,8 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { services } from './data/services';
+import { services as staticServices } from './data/services';
 import HeroSection from './components/HeroSection';
 import BookingModal from './components/BookingModal';
 import { apiUrl } from './apiBase';
+
+type ServiceCategory = {
+  category: string;
+  items: Array<{ name: string; price: string; desc?: string; durationMin?: number; image?: string }>;
+};
 
 const fetchBookedSlotsForDate = async (dateStr: string): Promise<string[]> => {
   try {
@@ -19,9 +24,24 @@ const fetchBookedSlotsForDate = async (dateStr: string): Promise<string[]> => {
   }
 };
 
-const WHATSAPP_NUMBER = "5571999542265"; // Empresa Estúdio Renovo
+const fetchServiceCatalog = async (): Promise<{ catalog: ServiceCategory[]; managed: boolean }> => {
+  try {
+    const response = await fetch(apiUrl('/api/services'));
+    if (!response.ok) {
+      return { catalog: [], managed: false };
+    }
+    const data = await response.json();
+    return {
+      catalog: Array.isArray(data.catalog) ? data.catalog : [],
+      managed: data.managed === true,
+    };
+  } catch (error) {
+    console.error('Erro ao carregar catalogo de servicos:', error);
+    return { catalog: [], managed: false };
+  }
+};
 
-const allServicesFlat = services.flatMap(c => c.items);
+const WHATSAPP_NUMBER = "5571999542265"; // Empresa Estúdio Renovo
 
 type SelectedBookingService = {
   category: string;
@@ -64,6 +84,7 @@ const summarizeServiceSelection = (selectedServices: SelectedBookingService[]): 
 };
 
 export default function App() {
+  const [services, setServices] = useState<ServiceCategory[]>(staticServices as ServiceCategory[]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [step, setStep] = useState(1);
@@ -82,6 +103,17 @@ export default function App() {
   const [bookingError, setBookingError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Fetch service catalog from backend (synced with admin panel)
+  useEffect(() => {
+    let active = true;
+    fetchServiceCatalog().then(({ catalog, managed }) => {
+      if (active && managed && catalog.length > 0) {
+        setServices(catalog);
+      }
+    });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -123,7 +155,7 @@ export default function App() {
 
     const selectionSummary = summarizeServiceSelection(bookingData.selectedServices);
     const selectedServicePrice =
-      selectionSummary.servicePrice || bookingData.servicePrice || allServicesFlat.find(item => item.name === bookingData.service)?.price || 'Sob consulta';
+      selectionSummary.servicePrice || bookingData.servicePrice || services.flatMap(c => c.items).find(item => item.name === bookingData.service)?.price || 'Sob consulta';
     const selectedServiceName = selectionSummary.service || bookingData.service;
 
     try {
@@ -178,6 +210,7 @@ export default function App() {
       />
 
       <BookingModal
+        services={services}
         isModalOpen={isModalOpen}
         bookingData={bookingData}
         setBookingData={setBookingData}

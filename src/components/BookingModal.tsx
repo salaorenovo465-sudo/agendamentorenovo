@@ -1,7 +1,7 @@
-﻿import React from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
 import { Calendar, Clock, User, Phone, CheckCircle, ChevronLeft, ChevronRight, ArrowRight, X } from 'lucide-react';
-import { services } from '../data/services';
+
 import BookingCalendar from './BookingCalendar';
 import TimePicker from './TimePicker';
 
@@ -21,7 +21,13 @@ interface BookingData {
   phone: string;
 }
 
+type ServiceCategory = {
+  category: string;
+  items: Array<{ name: string; price: string; desc?: string; durationMin?: number; image?: string }>;
+};
+
 interface BookingModalProps {
+  services: ServiceCategory[];
   isModalOpen: boolean;
   bookingData: BookingData;
   setBookingData: React.Dispatch<React.SetStateAction<BookingData>>;
@@ -88,6 +94,7 @@ const formatBrazilWhatsappInput = (value: string): string => {
 };
 
 export default function BookingModal({
+  services,
   isModalOpen,
   bookingData,
   setBookingData,
@@ -159,17 +166,17 @@ export default function BookingModal({
         role="dialog"
         aria-modal="true"
       >
-        {/* Gold Accent Bar â€” assinatura de luxo */}
+        {/* Gold Accent Bar — assinatura de luxo */}
         <div className="gold-accent-bar"></div>
 
-        {/* Modal Header â€” with subtle gold gradient */}
+        {/* Modal Header — with subtle gold gradient */}
         <div className="booking-modal-header relative flex items-center justify-between px-5 sm:px-8 py-4 sm:py-6 border-b border-luxury-gold/10">
           <div className="absolute inset-0 bg-gradient-to-r from-luxury-gold/5 via-transparent to-luxury-gold/5"></div>
           <div className="relative flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-luxury-gold/10 flex items-center justify-center">
               <Calendar className="w-4 h-4 text-luxury-gold" />
             </div>
-            <h3 className="font-serif text-xl sm:text-2xl text-luxury-dark">Agendar HorÃ¡rio</h3>
+            <h3 className="font-serif text-xl sm:text-2xl text-luxury-dark">Agendar Horário</h3>
           </div>
           <button onClick={handleCloseModal} className="relative p-2 text-luxury-muted hover:text-luxury-dark transition-all rounded-full hover:bg-luxury-dark/5 hover:rotate-90 duration-300">
             <X className="w-5 h-5" />
@@ -179,13 +186,13 @@ export default function BookingModal({
         {/* Modal Body */}
         <div className="booking-modal-body overflow-y-auto flex-1 custom-scrollbar">
 
-          {/* Step Indicators â€” refined with icons */}
+          {/* Step Indicators — refined with icons */}
           <div className="booking-stepper flex items-center justify-center gap-3">
             <div className={`flex items-center gap-2.5 px-4 py-2 rounded-full transition-all duration-500 ${step >= 1 ? 'bg-luxury-gold/10' : 'bg-transparent'}`}>
               <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all duration-500 ${step >= 1 ? 'bg-luxury-gold text-white shadow-md shadow-luxury-gold/30' : 'bg-luxury-light text-luxury-muted border border-luxury-dark/10'}`}>
                 {step > 1 ? <CheckCircle className="w-3.5 h-3.5" /> : '1'}
               </div>
-              <span className={`text-[10px] tracking-[0.15em] uppercase font-semibold hidden sm:block transition-colors duration-500 ${step >= 1 ? 'text-luxury-gold' : 'text-luxury-muted/50'}`}>ServiÃ§o & Data</span>
+              <span className={`text-[10px] tracking-[0.15em] uppercase font-semibold hidden sm:block transition-colors duration-500 ${step >= 1 ? 'text-luxury-gold' : 'text-luxury-muted/50'}`}>Serviço & Data</span>
             </div>
             <div className={`w-8 h-[2px] rounded-full transition-all duration-700 ${step >= 2 ? 'bg-luxury-gold' : 'bg-luxury-dark/10'}`}></div>
             <div className={`flex items-center gap-2.5 px-4 py-2 rounded-full transition-all duration-500 ${step >= 2 ? 'bg-luxury-gold/10' : 'bg-transparent'}`}>
@@ -291,7 +298,7 @@ export default function BookingModal({
               {/* Time Selection */}
               <div className="space-y-3">
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-luxury-gold" /> Escolha o HorÃ¡rio
+                  <Clock className="w-4 h-4 text-luxury-gold" /> Escolha o Horário
                 </label>
                 <TimePicker
                   bookingData={bookingData}
@@ -306,7 +313,7 @@ export default function BookingModal({
           {step === 2 && !bookingSuccess && (
             <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
 
-              {/* Summary Card â€” premium */}
+              {/* Summary Card — premium */}
               <div className="booking-summary-card bg-gradient-to-br from-luxury-gold/8 to-luxury-gold/3 p-5 sm:p-6 border border-luxury-gold/15 relative overflow-hidden group">
                 <div className="absolute top-0 right-0 w-40 h-40 bg-luxury-gold/5 rounded-full -mr-20 -mt-20 transition-transform group-hover:scale-125 duration-1000"></div>
                 <div className="absolute bottom-0 left-0 w-24 h-24 bg-luxury-gold/5 rounded-full -ml-12 -mb-12"></div>
@@ -317,7 +324,7 @@ export default function BookingModal({
                 <ul className="space-y-3.5 text-sm relative z-10">
                   <li className="flex justify-between items-center border-b border-luxury-gold/10 pb-3.5">
                     <span className="text-luxury-muted font-semibold uppercase tracking-[0.15em] text-[10px] flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-luxury-gold inline-block"></span> ServiÃ§o
+                      <span className="w-1 h-1 rounded-full bg-luxury-gold inline-block"></span> Serviço
                     </span>
                     <span className="font-bold text-luxury-dark text-right max-w-[240px]">{serviceSummary.service}</span>
                   </li>
@@ -335,14 +342,14 @@ export default function BookingModal({
                   </li>
                   <li className="flex justify-between items-center">
                     <span className="text-luxury-muted font-semibold uppercase tracking-[0.15em] text-[10px] flex items-center gap-1.5">
-                      <span className="w-1 h-1 rounded-full bg-luxury-gold inline-block"></span> HorÃ¡rio
+                      <span className="w-1 h-1 rounded-full bg-luxury-gold inline-block"></span> Horário
                     </span>
                     <span className="font-bold text-luxury-gold text-base">{bookingData.time}</span>
                   </li>
                 </ul>
               </div>
 
-              {/* Personal Info â€” refined inputs */}
+              {/* Personal Info — refined inputs */}
               <div className="space-y-6">
                 <div className="space-y-2">
                   <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
@@ -382,14 +389,14 @@ export default function BookingModal({
               <div>
                 <h3 className="font-serif text-2xl text-luxury-dark mb-2">Agendamento Enviado!</h3>
                 <p className="text-luxury-muted text-sm leading-relaxed max-w-sm mx-auto">
-                  Seu pedido foi recebido com sucesso. Enviamos uma confirmaÃ§Ã£o no seu WhatsApp. âœ¨
+                  Seu pedido foi recebido com sucesso. Enviamos uma confirmação no seu WhatsApp. ✨
                 </p>
               </div>
 
               <div className="booking-summary-card bg-gradient-to-br from-luxury-gold/8 to-luxury-gold/3 p-5 border border-luxury-gold/15 text-left max-w-sm mx-auto">
                 <div className="space-y-2.5 text-sm">
                   <div className="flex justify-between">
-                    <span className="text-luxury-muted text-xs uppercase tracking-widest">ServiÃ§o</span>
+                    <span className="text-luxury-muted text-xs uppercase tracking-widest">Serviço</span>
                     <span className="font-semibold text-luxury-dark text-right max-w-[220px]">{serviceSummary.service}</span>
                   </div>
                   <div className="flex justify-between">
@@ -397,7 +404,7 @@ export default function BookingModal({
                     <span className="font-semibold text-luxury-dark">{bookingData.date.split('-').reverse().join('/')}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-luxury-muted text-xs uppercase tracking-widest">HorÃ¡rio</span>
+                    <span className="text-luxury-muted text-xs uppercase tracking-widest">Horário</span>
                     <span className="font-bold text-luxury-gold">{bookingData.time}</span>
                   </div>
                 </div>
@@ -405,8 +412,8 @@ export default function BookingModal({
 
               <div className="bg-luxury-light/60 rounded-xl p-4 max-w-sm mx-auto">
                 <p className="text-xs text-luxury-muted leading-relaxed">
-                  ðŸ“‹ <strong>Status:</strong> Aguardando confirmaÃ§Ã£o da nossa equipe.<br />
-                  VocÃª receberÃ¡ uma mensagem no WhatsApp assim que confirmarmos! ðŸ’–<br />
+                  📋 <strong>Status:</strong> Aguardando confirmação da nossa equipe.<br />
+                  Você receberá uma mensagem no WhatsApp assim que confirmarmos! 💖<br />
                   <em>Caso precise cancelar, envie "cancelar" no WhatsApp.</em>
                 </p>
               </div>
@@ -415,14 +422,14 @@ export default function BookingModal({
                 onClick={handleCloseModal}
                 className="btn-shimmer inline-flex items-center gap-2.5 px-8 py-4 rounded-full text-xs tracking-[0.15em] uppercase font-semibold bg-luxury-dark text-luxury-light hover:bg-luxury-gold shadow-lg shadow-luxury-dark/15 cursor-pointer hover:shadow-luxury-gold/25 transition-all duration-500"
               >
-                Voltar ao InÃ­cio <ArrowRight className="w-4 h-4" />
+                Voltar ao Início <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           )}
 
         </div>
 
-        {/* Modal Footer â€” elevated */}
+        {/* Modal Footer — elevated */}
         {!bookingSuccess && (
         <div className="booking-modal-footer px-5 sm:px-6 py-4 sm:py-5 border-t border-luxury-gold/10 bg-gradient-to-r from-luxury-light/80 via-luxury-white to-luxury-light/80 flex justify-between items-center flex-wrap gap-3">
           {step === 2 ? (

@@ -111,7 +111,75 @@ const getAvailabilityConstraints = async (date: string): Promise<{
   };
 };
 
+const formatPublicServicePrice = (price: unknown): string => {
+  const amount = Number(price);
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return 'Sob consulta';
+  }
+
+  return amount.toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
 export const publicRoutes = Router();
+
+/**
+ * Public endpoint to fetch the service catalog.
+ * Returns categories with their services, matching the format used by the landing page.
+ * Only active services are returned. The frontend uses this to stay in sync with admin changes.
+ */
+publicRoutes.get('/services', async (_req, res) => {
+  try {
+    const rows = await workbenchStore.list('services');
+
+    if (!rows || rows.length === 0) {
+      return res.json({ catalog: [], managed: false });
+    }
+
+    const categoryMap = new Map<string, { category: string; items: Array<{ name: string; price: string; desc: string; durationMin: number }> }>();
+
+    for (const row of rows) {
+      const name = typeof row.name === 'string' ? row.name.trim() : '';
+      if (!name) continue;
+
+      // Skip inactive services
+      if (row.active === false || row.active === 'false') continue;
+
+      const categoryName = (typeof row.category === 'string' ? row.category.trim() : '') || 'Sem categoria';
+      const normalizedKey = categoryName.toLowerCase();
+
+      let category = categoryMap.get(normalizedKey);
+      if (!category) {
+        category = { category: categoryName, items: [] };
+        categoryMap.set(normalizedKey, category);
+      }
+
+      category.items.push({
+        name,
+        price: formatPublicServicePrice(row.price),
+        desc: typeof row.description === 'string' ? row.description.trim() : '',
+        durationMin: Number(row.duration_min) || 60,
+      });
+    }
+
+    // Sort categories and services alphabetically
+    const catalog = Array.from(categoryMap.values())
+      .sort((a, b) => a.category.localeCompare(b.category, 'pt-BR'))
+      .map((cat) => ({
+        ...cat,
+        items: cat.items.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR')),
+      }));
+
+    return res.json({ catalog, managed: true });
+  } catch (error) {
+    console.error('Erro ao carregar catalogo publico de servicos:', error);
+    return res.json({ catalog: [], managed: false });
+  }
+});
 
 publicRoutes.get('/integration-status', async (req, res) => {
   const tenant = parseTenantFromQuery(req.query.tenant);
