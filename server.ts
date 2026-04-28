@@ -31,6 +31,8 @@ const resolveAllowedOrigins = (): string[] => {
 };
 
 const allowedOrigins = new Set(resolveAllowedOrigins());
+const allowLocalhostCors =
+  process.env.ALLOW_LOCALHOST_CORS === 'true' || process.env.NODE_ENV !== 'production';
 
 const isLocalhostOrigin = (origin: string): boolean => {
   try {
@@ -53,7 +55,7 @@ const corsOptions: CorsOptions = {
       return;
     }
 
-    if (allowedOrigins.has(origin) || isLocalhostOrigin(origin)) {
+    if (allowedOrigins.has(origin) || (allowLocalhostCors && isLocalhostOrigin(origin))) {
       callback(null, true);
       return;
     }

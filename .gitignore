@@ -11,5 +11,6 @@ database.sqlite-*
 service-account-key.json
 .env*
 !.env.example
+tokens que nao vao subir/
 
 .vercel

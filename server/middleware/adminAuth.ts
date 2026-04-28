@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import type { Request, Response, NextFunction } from 'express';
 
 const getAdminKeyFromRequest = (req: Request): string | null => {
@@ -27,7 +28,15 @@ export const adminAuth = (req: Request, res: Response, next: NextFunction): void
   }
 
   const receivedAdminKey = getAdminKeyFromRequest(req);
-  if (!receivedAdminKey || !validAdminKeys.includes(receivedAdminKey)) {
+  const isValidAdminKey = receivedAdminKey
+    ? validAdminKeys.some((validKey) => {
+        const expected = Buffer.from(validKey);
+        const received = Buffer.from(receivedAdminKey);
+        return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+      })
+    : false;
+
+  if (!isValidAdminKey) {
     res.status(401).json({ error: 'Não autorizado para área administrativa.' });
     return;
   }

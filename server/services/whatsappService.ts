@@ -1,16 +1,7 @@
 import fs from 'fs';
+import { createRequire } from 'module';
 import os from 'os';
 import path from 'path';
-
-import makeWASocket, {
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  type ConnectionState,
-  type WAMessage,
-  useMultiFileAuthState,
-} from '@whiskeysockets/baileys';
-import qrcode from 'qrcode';
-import P from 'pino';
 
 import '../loadEnv';
 import { inboxStore } from '../db/inboxStore';
@@ -21,11 +12,98 @@ import {
   setOutgoingDeliveryStatus,
 } from './whatsappDeliveryStatus';
 
+const require = createRequire(import.meta.url);
+
+type BaileysMessage = {
+  key: {
+    remoteJid?: string | null;
+    fromMe?: boolean;
+    id?: string | null;
+  };
+  message?: {
+    conversation?: string;
+    extendedTextMessage?: { text?: string | null };
+    imageMessage?: { caption?: string | null };
+    videoMessage?: { caption?: string | null };
+  } | null;
+  pushName?: string | null;
+};
+
+type BaileysConnectionState = {
+  qr?: string;
+  connection?: 'connecting' | 'open' | 'close' | string;
+  lastDisconnect?: {
+    error?: {
+      output?: {
+        statusCode?: number;
+      };
+    };
+  };
+};
+
+type BaileysMessagesUpsert = {
+  type?: string;
+  messages?: BaileysMessage[];
+};
+
+type BaileysSocket = {
+  user?: { id?: string | null } | null;
+  ws: { close: () => void | Promise<void> };
+  ev: {
+    on: (event: string, handler: (payload: unknown) => void) => void;
+  };
+  onWhatsApp: (phone: string) => Promise<Array<{ jid?: string | null; exists?: boolean }>>;
+  profilePictureUrl: (jid: string, type: 'image') => Promise<string>;
+  sendMessage: (jid: string, content: Record<string, unknown>) => Promise<{ key: { id?: string | null } }>;
+};
+
+type BaileysRuntime = {
+  makeWASocket: (options: Record<string, unknown>) => BaileysSocket;
+  fetchLatestBaileysVersion: () => Promise<{ version: unknown }>;
+  useMultiFileAuthState: (dir: string) => Promise<{ state: unknown; saveCreds: () => void | Promise<void> }>;
+  toDataURL: (value: string) => Promise<string>;
+  logger: unknown;
+  loggedOutStatusCode: number;
+};
+
+type BaileysModule = {
+  default: BaileysRuntime['makeWASocket'];
+  fetchLatestBaileysVersion: BaileysRuntime['fetchLatestBaileysVersion'];
+  useMultiFileAuthState: BaileysRuntime['useMultiFileAuthState'];
+  DisconnectReason?: { loggedOut?: number };
+};
+
+type QrCodeModule = {
+  toDataURL: BaileysRuntime['toDataURL'];
+};
+
+type PinoModule = {
+  default?: (options: Record<string, unknown>) => unknown;
+} & ((options: Record<string, unknown>) => unknown);
+
+const importOptional = (specifier: string): Promise<unknown> => import(specifier);
+
+const isOptionalDriverInstalled = (): boolean => {
+  try {
+    require.resolve('@whiskeysockets/baileys');
+    require.resolve('qrcode');
+    require.resolve('pino');
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const WHATSAPP_FEATURE_ENABLED = process.env.WHATSAPP_FEATURE_ENABLED === 'true';
-const BAILEYS_ENABLED = WHATSAPP_FEATURE_ENABLED && process.env.BAILEYS_ENABLED !== 'false';
+const BAILEYS_REQUESTED = WHATSAPP_FEATURE_ENABLED && process.env.BAILEYS_ENABLED !== 'false';
+const BAILEYS_DRIVER_AVAILABLE = BAILEYS_REQUESTED && isOptionalDriverInstalled();
+const BAILEYS_ENABLED = BAILEYS_REQUESTED && BAILEYS_DRIVER_AVAILABLE;
 const DEFAULT_BAILEYS_AUTH_DIR = path.resolve(os.homedir(), '.agendamentorenovo', 'baileys_auth');
 const BAILEYS_AUTH_DIR = process.env.BAILEYS_AUTH_DIR || DEFAULT_BAILEYS_AUTH_DIR;
 const BAILEYS_AUTO_CONNECT = process.env.BAILEYS_AUTO_CONNECT !== 'false';
+const BAILEYS_DISABLED_REASON = BAILEYS_REQUESTED && !BAILEYS_DRIVER_AVAILABLE
+  ? 'Driver Baileys legado nao instalado. Use Evolution API em producao.'
+  : 'WHATSAPP_FEATURE_ENABLED=false';
 
 const MASTER_SALON_WHATSAPP = normalizeWhatsappPhone('5571999542265');
 const BAILEYS_SALON_WHATSAPP = MASTER_SALON_WHATSAPP ? [MASTER_SALON_WHATSAPP] : [];
@@ -50,10 +128,11 @@ const state: StoredWhatsappState = {
   lastUpdateAt: new Date().toISOString(),
 };
 
-let socket: ReturnType<typeof makeWASocket> | null = null;
+let socket: BaileysSocket | null = null;
 let connectPromise: Promise<void> | null = null;
 let manualDisconnect = false;
 let reconnectTimer: NodeJS.Timeout | null = null;
+let baileysRuntimePromise: Promise<BaileysRuntime | null> | null = null;
 
 type ContactAvatarCacheEntry = {
   url: string | null;
@@ -95,7 +174,42 @@ const getRememberedContactJid = (phone: string): string | null => {
   return cached.jid;
 };
 
-const logger = P({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' });
+const loadBaileysRuntime = async (): Promise<BaileysRuntime | null> => {
+  if (!BAILEYS_DRIVER_AVAILABLE) {
+    return null;
+  }
+
+  if (!baileysRuntimePromise) {
+    baileysRuntimePromise = (async () => {
+      try {
+        const [baileysImport, qrcodeImport, pinoImport] = await Promise.all([
+          importOptional('@whiskeysockets/baileys'),
+          importOptional('qrcode'),
+          importOptional('pino'),
+        ]);
+
+        const baileysModule = baileysImport as BaileysModule;
+        const qrcodeModule = qrcodeImport as QrCodeModule;
+        const pinoModule = pinoImport as PinoModule;
+        const createLogger = pinoModule.default || pinoModule;
+
+        return {
+          makeWASocket: baileysModule.default,
+          fetchLatestBaileysVersion: baileysModule.fetchLatestBaileysVersion,
+          useMultiFileAuthState: baileysModule.useMultiFileAuthState,
+          toDataURL: qrcodeModule.toDataURL,
+          logger: createLogger({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' }),
+          loggedOutStatusCode: baileysModule.DisconnectReason?.loggedOut || 401,
+        };
+      } catch (error) {
+        console.warn('Driver Baileys indisponivel:', error);
+        return null;
+      }
+    })();
+  }
+
+  return baileysRuntimePromise;
+};
 
 const setState = (patch: Partial<StoredWhatsappState>): void => {
   Object.assign(state, patch, { lastUpdateAt: new Date().toISOString() });
@@ -112,7 +226,7 @@ const clearReconnectTimer = (): void => {
 const isBroadcastOrGroup = (jid: string): boolean =>
   jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid === 'status@broadcast';
 
-const extractTextFromMessage = (message: WAMessage): string | null => {
+const extractTextFromMessage = (message: BaileysMessage): string | null => {
   const content = message.message;
   if (!content) {
     return null;
@@ -200,7 +314,7 @@ const handleMessageReceiptUpdate = (updates: unknown): void => {
   });
 };
 
-const handleIncomingMessage = async (message: WAMessage): Promise<void> => {
+const handleIncomingMessage = async (message: BaileysMessage): Promise<void> => {
   const remoteJid = message.key.remoteJid || '';
   if (!remoteJid || message.key.fromMe || isBroadcastOrGroup(remoteJid)) {
     return;
@@ -236,11 +350,12 @@ const handleIncomingMessage = async (message: WAMessage): Promise<void> => {
   }
 };
 
-const handleConnectionUpdate = async (update: Partial<ConnectionState>): Promise<void> => {
+const handleConnectionUpdate = async (update: Partial<BaileysConnectionState>): Promise<void> => {
   if (update.qr) {
     let qrDataUrl: string | null = null;
     try {
-      qrDataUrl = await qrcode.toDataURL(update.qr);
+      const runtime = await loadBaileysRuntime();
+      qrDataUrl = runtime ? await runtime.toDataURL(update.qr) : null;
     } catch (error) {
       console.error('Falha ao gerar QR DataURL do Baileys:', error);
     }
@@ -271,7 +386,8 @@ const handleConnectionUpdate = async (update: Partial<ConnectionState>): Promise
   if (update.connection === 'close') {
     const statusCode =
       (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode || 0;
-    const loggedOut = statusCode === DisconnectReason.loggedOut;
+    const runtime = await loadBaileysRuntime();
+    const loggedOut = statusCode === (runtime?.loggedOutStatusCode || 401);
     const reason = loggedOut
       ? 'Sessao WhatsApp desconectada (logout). Escaneie o QR novamente.'
       : `Conexao encerrada (${statusCode || 'sem-codigo'}).`;
@@ -304,7 +420,7 @@ const ensureAuthDir = (): void => {
 
 export const connectWhatsapp = async (): Promise<void> => {
   if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
+    setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
     return;
   }
 
@@ -320,28 +436,35 @@ export const connectWhatsapp = async (): Promise<void> => {
       ensureAuthDir();
       setState({ connectionState: 'connecting', lastError: null });
 
-      const { state: authState, saveCreds } = await useMultiFileAuthState(BAILEYS_AUTH_DIR);
-      const { version } = await fetchLatestBaileysVersion();
+      const runtime = await loadBaileysRuntime();
+      if (!runtime) {
+        setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
+        return;
+      }
 
-      socket = makeWASocket({
+      const { state: authState, saveCreds } = await runtime.useMultiFileAuthState(BAILEYS_AUTH_DIR);
+      const { version } = await runtime.fetchLatestBaileysVersion();
+
+      socket = runtime.makeWASocket({
         version,
         auth: authState,
-        logger,
+        logger: runtime.logger,
         printQRInTerminal: false,
         browser: ['Renovo SaaS', 'Chrome', '1.0.0'],
       });
 
       socket.ev.on('creds.update', saveCreds);
       socket.ev.on('connection.update', (update) => {
-        void handleConnectionUpdate(update);
+        void handleConnectionUpdate(update as Partial<BaileysConnectionState>);
       });
 
       socket.ev.on('messages.upsert', (upsert) => {
-        if (upsert.type !== 'notify') {
+        const payload = upsert as BaileysMessagesUpsert;
+        if (payload.type !== 'notify' || !Array.isArray(payload.messages)) {
           return;
         }
 
-        upsert.messages.forEach((message) => {
+        payload.messages.forEach((message) => {
           void handleIncomingMessage(message).catch((error) => {
             console.error('Erro ao processar mensagem recebida via Baileys:', error);
           });
@@ -414,7 +537,7 @@ export const logoutWhatsapp = async (): Promise<void> => {
 
 export const initializeWhatsapp = async (): Promise<void> => {
   if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
+    setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
     return;
   }
 
@@ -424,7 +547,7 @@ export const initializeWhatsapp = async (): Promise<void> => {
   }
 };
 
-const ensureSocketConnected = async (): Promise<ReturnType<typeof makeWASocket>> => {
+const ensureSocketConnected = async (): Promise<BaileysSocket> => {
   if (state.connectionState !== 'connected' || !socket) {
     await connectWhatsapp();
   }
@@ -550,7 +673,7 @@ const decodeAttachmentBuffer = (rawBase64: string): Buffer => {
 };
 
 const resolveSendJid = async (
-  sock: ReturnType<typeof makeWASocket>,
+  sock: BaileysSocket,
   normalizedPhone: string,
 ): Promise<string> => {
   const candidateJids = new Set<string>();
