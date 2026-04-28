@@ -37,12 +37,12 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
   return (
-    <div className="booking-calendar-panel bg-luxury-light/80 border border-luxury-dark/8 p-4 sm:p-5">
-      <div className="flex justify-between items-center mb-5">
+    <div className="booking-calendar-panel bg-luxury-light/80 border border-luxury-dark/8 p-3 sm:p-5">
+      <div className="flex justify-between items-center mb-3 sm:mb-5">
         <button type="button" onClick={prevMonth} className="w-8 h-8 flex items-center justify-center rounded-lg border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
           <ChevronLeft className="w-4 h-4" />
         </button>
-        <span className="font-serif text-xl font-medium text-luxury-dark tracking-wide">
+        <span className="font-serif text-lg sm:text-xl font-medium text-luxury-dark tracking-wide">
           {monthNames[month]} <span className="text-luxury-gold">{year}</span>
         </span>
         <button type="button" onClick={nextMonth} className="w-8 h-8 flex items-center justify-center rounded-lg border border-luxury-gold/30 hover:bg-luxury-gold/10 text-luxury-gold transition-all duration-300 cursor-pointer hover:border-luxury-gold">
@@ -50,7 +50,7 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 mb-3">
+      <div className="grid grid-cols-7 gap-1 mb-2 sm:mb-3">
         {weekDays.map(day => (
           <div key={day} className="text-center text-[9px] tracking-[0.2em] uppercase text-luxury-muted/60 font-semibold py-1">
             {day}
@@ -58,7 +58,7 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-x-1 gap-y-1.5">
+      <div className="grid grid-cols-7 gap-x-1 gap-y-1">
         {blanks.map(blank => (
           <div key={`blank-${blank}`} className="p-2"></div>
         ))}
@@ -77,8 +77,8 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
               key={day}
               type="button"
               disabled={isUnavailable}
-              onClick={() => setBookingData({ ...bookingData, date: dateStr, time: '' })}
-              className={`p-1.5 rounded-full text-sm flex flex-col items-center justify-center transition-all duration-300 ${
+              onClick={() => setBookingData((current) => ({ ...current, date: dateStr, time: '' }))}
+              className={`p-0.5 sm:p-1.5 rounded-full text-sm flex flex-col items-center justify-center transition-all duration-300 ${
                 isSelected
                   ? 'bg-luxury-gold text-white shadow-md shadow-luxury-gold/30 scale-105'
                   : isUnavailable

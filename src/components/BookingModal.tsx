@@ -123,29 +123,34 @@ export default function BookingModal({
   const toggleService = (service: { name: string; price: string }) => {
     if (!selectedCategory) return;
 
-    const exists = selectedServices.some((item) => item.name === service.name);
-    const nextServices = exists
-      ? selectedServices.filter((item) => item.name !== service.name)
-      : [...selectedServices, { category: selectedCategory, name: service.name, price: service.price }];
-    const nextSummary = summarizeSelectedServices(nextServices);
+    setBookingData((current) => {
+      const currentSelectedServices = current.selectedServices || [];
+      const exists = currentSelectedServices.some((item) => item.name === service.name);
+      const nextServices = exists
+        ? currentSelectedServices.filter((item) => item.name !== service.name)
+        : [...currentSelectedServices, { category: selectedCategory, name: service.name, price: service.price }];
+      const nextSummary = summarizeSelectedServices(nextServices);
 
-    setBookingData({
-      ...bookingData,
-      selectedServices: nextServices,
-      service: nextSummary.service,
-      servicePrice: nextSummary.servicePrice,
+      return {
+        ...current,
+        selectedServices: nextServices,
+        service: nextSummary.service,
+        servicePrice: nextSummary.servicePrice,
+      };
     });
   };
 
   const removeSelectedService = (serviceName: string) => {
-    const nextServices = selectedServices.filter((item) => item.name !== serviceName);
-    const nextSummary = summarizeSelectedServices(nextServices);
+    setBookingData((current) => {
+      const nextServices = (current.selectedServices || []).filter((item) => item.name !== serviceName);
+      const nextSummary = summarizeSelectedServices(nextServices);
 
-    setBookingData({
-      ...bookingData,
-      selectedServices: nextServices,
-      service: nextSummary.service,
-      servicePrice: nextSummary.servicePrice,
+      return {
+        ...current,
+        selectedServices: nextServices,
+        service: nextSummary.service,
+        servicePrice: nextSummary.servicePrice,
+      };
     });
   };
 
@@ -184,7 +189,7 @@ export default function BookingModal({
         </div>
 
         {/* Modal Body */}
-        <div className="booking-modal-body overflow-y-auto flex-1 custom-scrollbar">
+        <div className="booking-modal-body min-h-0 overflow-y-auto flex-1 custom-scrollbar">
 
           {/* Step Indicators — refined with icons */}
           <div className="booking-stepper flex items-center justify-center gap-3">
@@ -202,9 +207,10 @@ export default function BookingModal({
           </div>
 
           {step === 1 && (
-            <div className="space-y-7 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="booking-step-one animate-in fade-in slide-in-from-bottom-4 duration-500">
               {/* Sticky Header for Category/Service */}
-              <div className="booking-service-panel sticky top-0 bg-luxury-white/95 backdrop-blur-md z-20 border border-luxury-gold/10 shadow-[0_12px_40px_-24px_rgba(28,24,21,0.25)] transition-all duration-300">
+              <div className="booking-step-services">
+              <div className="booking-service-panel lg:sticky lg:top-0 bg-luxury-white/95 backdrop-blur-md z-20 border border-luxury-gold/10 shadow-[0_12px_40px_-24px_rgba(28,24,21,0.25)] transition-all duration-300">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {/* Category Selection */}
                   <div className="space-y-2">
@@ -275,12 +281,11 @@ export default function BookingModal({
                   </div>
                 )}
               </div>
+              </div>
 
-              {/* Section Divider */}
-              <div className="section-divider"></div>
-
+              <div className="booking-step-schedule">
               {/* Date Selection */}
-              <div className="space-y-3">
+              <div className="booking-flow-section booking-calendar-section space-y-3">
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-luxury-gold" /> Escolha a Data
                 </label>
@@ -292,11 +297,8 @@ export default function BookingModal({
                 />
               </div>
 
-              {/* Section Divider */}
-              <div className="section-divider"></div>
-
               {/* Time Selection */}
-              <div className="space-y-3">
+              <div className="booking-flow-section booking-time-section space-y-3">
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
                   <Clock className="w-4 h-4 text-luxury-gold" /> Escolha o Horário
                 </label>
@@ -307,11 +309,12 @@ export default function BookingModal({
                   isLoadingSlots={isLoadingSlots}
                 />
               </div>
+              </div>
             </div>
           )}
 
           {step === 2 && !bookingSuccess && (
-            <div className="space-y-8 animate-in fade-in slide-in-from-right-4 duration-500">
+            <div className="booking-step-details animate-in fade-in slide-in-from-right-4 duration-500">
 
               {/* Summary Card — premium */}
               <div className="booking-summary-card bg-gradient-to-br from-luxury-gold/8 to-luxury-gold/3 p-5 sm:p-6 border border-luxury-gold/15 relative overflow-hidden group">
@@ -350,7 +353,7 @@ export default function BookingModal({
               </div>
 
               {/* Personal Info — refined inputs */}
-              <div className="space-y-6">
+              <div className="booking-details-form space-y-6">
                 <div className="space-y-2">
                   <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
                     <User className="w-4 h-4 text-luxury-gold" /> Seu Nome
