@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Clock, Calendar, Loader2 } from 'lucide-react';
 
 interface BookingData {
@@ -18,7 +18,33 @@ interface TimePickerProps {
   isLoadingSlots: boolean;
 }
 
+const HOURS = Array.from({ length: 13 }, (_, i) => String(i + 8).padStart(2, '0'));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+const parseTimeParts = (time: string): { hour: string; minute: string } => {
+  const [rawHour, rawMinute] = time.split(':');
+
+  return {
+    hour: rawHour || '09',
+    minute: rawMinute || '00',
+  };
+};
+
+const toMinuteSlot = (time: string): string => time.split(':').slice(0, 2).join(':');
+
 export default function TimePicker({ bookingData, setBookingData, bookedSlots, isLoadingSlots }: TimePickerProps) {
+  const [selectedHour, setSelectedHour] = useState<string>('');
+
+  useEffect(() => {
+    setSelectedHour('');
+  }, [bookingData.date]);
+
+  useEffect(() => {
+    if (bookingData.time) {
+      setSelectedHour(parseTimeParts(bookingData.time).hour);
+    }
+  }, [bookingData.time]);
+
   if (!bookingData.date) {
     return (
       <div className="py-6 text-center text-sm font-medium text-luxury-muted/60 bg-luxury-light/30 rounded-lg border border-dashed border-luxury-dark/8">
@@ -37,60 +63,108 @@ export default function TimePicker({ bookingData, setBookingData, bookedSlots, i
     );
   }
 
+  const selectedTime = parseTimeParts(bookingData.time);
+  const activeHour = selectedHour || selectedTime.hour;
+  const selectedMinuteSlot = `${activeHour}:${selectedTime.minute}`;
+  const isSelectedMinuteBooked = bookedSlots.includes('all') || bookedSlots.some((slot) => toMinuteSlot(slot) === selectedMinuteSlot);
+
+  const chooseHour = (hour: string) => {
+    setSelectedHour(hour);
+    setBookingData((current) => {
+      return {
+        ...current,
+        time: '',
+      };
+    });
+  };
+
+  const chooseMinute = (minute: string) => {
+    if (!activeHour) return;
+    setBookingData((current) => ({
+      ...current,
+      time: `${activeHour}:${minute}`,
+    }));
+  };
+
+  const changeHour = () => {
+    setSelectedHour('');
+    setBookingData((current) => ({ ...current, time: '' }));
+  };
+
   return (
-    <div className="booking-time-panel relative w-full mx-auto py-5 px-3 sm:py-6 sm:px-4 bg-gradient-to-b from-[#F9F7F2] to-[#EBE4D5] shadow-[inset_0_2px_10px_rgba(255,255,255,0.8),0_10px_30px_rgba(0,0,0,0.05)] border border-white/60 overflow-hidden">
-      {/* Highlight bar in the middle */}
-      <div className="booking-time-highlight absolute top-1/2 left-5 right-5 sm:left-6 sm:right-6 -translate-y-1/2 bg-white/70 backdrop-blur-md rounded-lg border border-luxury-gold/30 shadow-[0_4px_15px_rgba(212,175,55,0.1)] pointer-events-none z-0"></div>
-
-      <div className="flex items-center justify-center gap-5 sm:gap-8 relative z-10">
-        {/* Coluna de Horas */}
-        <div className="flex flex-col items-center">
-          <span className="text-[9px] uppercase tracking-[0.25em] text-luxury-dark/50 mb-4 font-bold flex items-center gap-1">
-            <Clock className="w-3 h-3 text-luxury-gold" /> Hora
-          </span>
-          <div className="booking-time-wheel h-40 sm:h-48 w-14 sm:w-16 overflow-y-auto snap-y snap-mandatory relative [mask-image:linear-gradient(to_bottom,transparent,black_35%,black_65%,transparent)] [&::-webkit-scrollbar]:hidden selection-roleta" style={{ scrollbarWidth: 'none' }}>
-             <div className="booking-time-spacer w-full snap-center"></div> {/* Spacer */}
-             {Array.from({length: 13}, (_, i) => String(i + 8).padStart(2, '0')).map(hour => {
-               const currentMinute = bookingData.time.split(':')[1] || '00';
-               const isSelected = bookingData.time.startsWith(`${hour}:`);
-               return (
-                 <button type="button" key={hour} onClick={() => setBookingData((current) => ({...current, time: `${hour}:${current.time.split(':')[1] || currentMinute}`}))} className={`booking-time-option snap-center w-full flex items-center justify-center text-3xl sm:text-[2.5rem] transition-all duration-300 ${isSelected ? 'text-luxury-dark font-medium scale-110 tracking-tight' : 'text-luxury-dark font-light opacity-30 scale-75 hover:opacity-60'}`}>
-                   {hour}
-                 </button>
-               );
-             })}
-             <div className="booking-time-spacer w-full snap-center"></div> {/* Spacer */}
-             <div className="booking-time-spacer w-full snap-center"></div>
-          </div>
+    <div className="booking-time-panel bg-luxury-light/80 border border-luxury-dark/8 p-3 sm:p-5">
+      <div className="booking-time-summary">
+        <div>
+          <span>Horario selecionado</span>
+          <strong>{bookingData.time || (selectedHour ? `${selectedHour}:--` : '--:--')}</strong>
         </div>
-
-        <div className="booking-time-separator flex flex-col items-center justify-center mt-8 h-40 sm:h-48 pointer-events-none">
-          <span className="text-4xl font-light text-luxury-gold/50 pb-2 animate-pulse">:</span>
-        </div>
-
-        {/* Coluna de Minutos */}
-        <div className="flex flex-col items-center">
-          <span className="text-[9px] uppercase tracking-[0.25em] text-luxury-dark/50 mb-4 font-bold">Min</span>
-          <div className="booking-time-wheel h-40 sm:h-48 w-14 sm:w-16 overflow-y-auto snap-y snap-mandatory relative [mask-image:linear-gradient(to_bottom,transparent,black_35%,black_65%,transparent)] [&::-webkit-scrollbar]:hidden selection-roleta" style={{ scrollbarWidth: 'none' }}>
-             <div className="booking-time-spacer w-full snap-center"></div> {/* Spacer */}
-             {['00', '20', '40'].map(minute => {
-               const currentHour = bookingData.time.split(':')[0] || '09';
-               const isSelected = bookingData.time.endsWith(`:${minute}`);
-
-               const comboTime = `${currentHour}:${minute}`;
-               const isBooked = bookedSlots.includes(comboTime);
-
-               return (
-                 <button type="button" disabled={isBooked} key={minute} onClick={() => setBookingData((current) => ({...current, time: `${current.time.split(':')[0] || currentHour}:${minute}`}))} className={`booking-time-option snap-center w-full flex items-center justify-center text-3xl sm:text-[2.5rem] transition-all duration-300 relative ${isBooked ? 'text-red-900/10 font-thin cursor-not-allowed line-through scale-75' : isSelected ? 'text-luxury-dark font-medium scale-110 tracking-tight' : 'text-luxury-dark font-light opacity-30 scale-75 hover:opacity-60'}`}>
-                   {minute}
-                 </button>
-               );
-             })}
-             <div className="booking-time-spacer w-full snap-center"></div> {/* Spacer */}
-             <div className="booking-time-spacer w-full snap-center"></div>
-          </div>
-        </div>
+        {bookingData.time && isSelectedMinuteBooked && (
+          <small>Este minuto ja esta ocupado. Escolha outro horario.</small>
+        )}
       </div>
+
+      <div className={`booking-time-stage-card ${selectedHour ? 'booking-time-stage-card-compact' : ''}`}>
+      <div className="booking-time-grid-label">
+          <Clock className="w-3.5 h-3.5 text-luxury-gold" />
+          <span>Hora</span>
+          {selectedHour && (
+            <button type="button" onClick={changeHour}>
+              Trocar
+            </button>
+          )}
+      </div>
+        {selectedHour ? (
+          <div className="booking-time-picked-row">
+            <strong>{selectedHour}</strong>
+            <span>Hora escolhida</span>
+          </div>
+        ) : (
+          <div className="booking-time-grid booking-time-grid-hours">
+            {HOURS.map((hour) => (
+              <button
+                key={hour}
+                type="button"
+                onClick={() => chooseHour(hour)}
+                className="booking-time-cell"
+              >
+                {hour}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {selectedHour && (
+        <div className="booking-time-stage-card booking-time-stage-card-open">
+          <div className="booking-time-grid-label">
+            <span>Minutos</span>
+          </div>
+          <div className="booking-time-grid booking-time-grid-minutes">
+            {MINUTES.map((minute) => {
+              const minuteSlot = `${selectedHour}:${minute}`;
+              const isBooked = bookedSlots.includes('all') || bookedSlots.some((slot) => toMinuteSlot(slot) === minuteSlot);
+              const isSelected = bookingData.time === minuteSlot;
+          return (
+            <button
+                  key={minute}
+              type="button"
+              disabled={isBooked}
+                  onClick={() => chooseMinute(minute)}
+              className={`booking-time-cell ${
+                isBooked
+                  ? 'booking-time-cell-disabled'
+                  : isSelected
+                    ? 'booking-time-cell-active'
+                    : ''
+              }`}
+            >
+                  {minute}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+      )}
     </div>
   );
 }

@@ -174,6 +174,10 @@ const buildDayBoundary = (date: string, isEnd: boolean): Date => {
   const time = isEnd ? '23:59:59.999' : '00:00:00';
   return new Date(`${date}T${time}${tzOffsetStr}`);
 };
+const buildBookingDateTime = (date: string, time: string): Date => {
+  const normalizedTime = /^\d{2}:\d{2}$/.test(time) ? `${time}:00` : time;
+  return new Date(`${date}T${normalizedTime}${tzOffsetStr}`);
+};
 
 export const fetchBusySlotsFromIcs = async (date: string): Promise<string[]> => {
   if (!GOOGLE_CALENDAR_ICS_URL) {
@@ -284,7 +288,7 @@ export const createCalendarEventForBooking = async (booking: BookingRecord): Pro
     return null;
   }
 
-  const startDateTime = new Date(`${booking.date}T${booking.time}:00${tzOffsetStr}`);
+  const startDateTime = buildBookingDateTime(booking.date, booking.time);
   const durationMin = await getServiceDurationMin(booking.service);
   const endDateTime = new Date(startDateTime.getTime() + durationMin * 60 * 1000);
 
@@ -316,7 +320,7 @@ export const updateCalendarEventForBooking = async (eventId: string, booking: Bo
     return;
   }
 
-  const startDateTime = new Date(`${booking.date}T${booking.time}:00${tzOffsetStr}`);
+  const startDateTime = buildBookingDateTime(booking.date, booking.time);
   const durationMin = await getServiceDurationMin(booking.service);
   const endDateTime = new Date(startDateTime.getTime() + durationMin * 60 * 1000);
 

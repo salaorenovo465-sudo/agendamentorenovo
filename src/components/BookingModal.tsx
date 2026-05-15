@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { Calendar, Clock, User, Phone, CheckCircle, ChevronLeft, ChevronRight, ArrowRight, X } from 'lucide-react';
 
@@ -112,6 +112,8 @@ export default function BookingModal({
   handleCloseModal,
   handleConfirmBooking,
 }: BookingModalProps) {
+  const [isDateCardExpanded, setIsDateCardExpanded] = useState(true);
+
   if (!isModalOpen) return null;
 
   const selectedServices = bookingData.selectedServices || [];
@@ -119,6 +121,7 @@ export default function BookingModal({
   const isStep1Valid = selectedServices.length > 0 && bookingData.date && bookingData.time;
   const isStep2Valid = bookingData.name.length > 2 && normalizePhoneDigits(bookingData.phone).length >= 12;
   const currentCategoryServices = services.find(c => c.category === selectedCategory)?.items || [];
+  const isDateCompact = Boolean(bookingData.date) && !isDateCardExpanded;
 
   const toggleService = (service: { name: string; price: string }) => {
     if (!selectedCategory) return;
@@ -283,9 +286,9 @@ export default function BookingModal({
               </div>
               </div>
 
-              <div className="booking-step-schedule">
+              <div className={`booking-step-schedule ${isDateCompact ? 'booking-step-schedule-date-compact' : ''}`}>
               {/* Date Selection */}
-              <div className="booking-flow-section booking-calendar-section space-y-3">
+              <div className={`booking-flow-section booking-calendar-section space-y-3 ${isDateCompact ? 'booking-calendar-section-compact' : ''}`}>
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
                   <Calendar className="w-4 h-4 text-luxury-gold" /> Escolha a Data
                 </label>
@@ -294,6 +297,9 @@ export default function BookingModal({
                   setCurrentMonthDate={setCurrentMonthDate}
                   bookingData={bookingData}
                   setBookingData={setBookingData}
+                  compact={isDateCompact}
+                  onDateSelected={() => setIsDateCardExpanded(false)}
+                  onEditDate={() => setIsDateCardExpanded(true)}
                 />
               </div>
 

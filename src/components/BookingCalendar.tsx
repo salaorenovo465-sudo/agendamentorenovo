@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
 
 interface BookingData {
   service: string;
@@ -16,9 +16,20 @@ interface BookingCalendarProps {
   setCurrentMonthDate: React.Dispatch<React.SetStateAction<Date>>;
   bookingData: BookingData;
   setBookingData: React.Dispatch<React.SetStateAction<BookingData>>;
+  compact?: boolean;
+  onDateSelected?: () => void;
+  onEditDate?: () => void;
 }
 
-export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate, bookingData, setBookingData }: BookingCalendarProps) {
+export default function BookingCalendar({
+  currentMonthDate,
+  setCurrentMonthDate,
+  bookingData,
+  setBookingData,
+  compact = false,
+  onDateSelected,
+  onEditDate,
+}: BookingCalendarProps) {
   const year = currentMonthDate.getFullYear();
   const month = currentMonthDate.getMonth();
   const firstDay = new Date(year, month, 1).getDay();
@@ -35,6 +46,26 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
 
   const blanks = Array.from({ length: firstDay }, (_, i) => i);
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const selectedDateLabel = bookingData.date ? bookingData.date.split('-').reverse().join('/') : '';
+
+  if (compact && bookingData.date) {
+    return (
+      <div className="booking-calendar-panel booking-calendar-panel-compact bg-luxury-light/80 border border-luxury-dark/8 p-3 sm:p-5">
+        <div className="booking-compact-card">
+          <div className="booking-compact-icon">
+            <CalendarDays className="w-4 h-4" />
+          </div>
+          <div>
+            <span>Data escolhida</span>
+            <strong>{selectedDateLabel}</strong>
+          </div>
+          <button type="button" onClick={onEditDate}>
+            Alterar
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="booking-calendar-panel bg-luxury-light/80 border border-luxury-dark/8 p-3 sm:p-5">
@@ -77,7 +108,10 @@ export default function BookingCalendar({ currentMonthDate, setCurrentMonthDate,
               key={day}
               type="button"
               disabled={isUnavailable}
-              onClick={() => setBookingData((current) => ({ ...current, date: dateStr, time: '' }))}
+              onClick={() => {
+                setBookingData((current) => ({ ...current, date: dateStr, time: '' }));
+                onDateSelected?.();
+              }}
               className={`p-0.5 sm:p-1.5 rounded-full text-sm flex flex-col items-center justify-center transition-all duration-300 ${
                 isSelected
                   ? 'bg-luxury-gold text-white shadow-md shadow-luxury-gold/30 scale-105'

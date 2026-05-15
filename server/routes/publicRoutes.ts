@@ -35,6 +35,21 @@ const parseTenantFromQuery = (value: unknown): string | null => {
   return TENANT_REGEX.test(normalized) ? normalized : null;
 };
 
+const normalizeBookingTime = (value: unknown): string => {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const trimmed = value.trim();
+  if (!TIME_REGEX.test(trimmed)) {
+    return '';
+  }
+
+  return trimmed;
+};
+
+const toMinuteSlot = (time: string): string => time.slice(0, 5);
+
 const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
   if (!Array.isArray(value)) {
     return [];
@@ -288,7 +303,8 @@ publicRoutes.post('/bookings', async (req, res) => {
   const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
   const customerName = typeof name === 'string' ? name.trim() : '';
   const customerPhone = typeof phone === 'string' ? (normalizeWhatsappPhoneWithPlus(phone) || phone.trim()) : '';
-  const normalizedTime = typeof time === 'string' ? time.slice(0, 5) : '';
+  const normalizedTime = normalizeBookingTime(time);
+  const normalizedMinuteSlot = toMinuteSlot(normalizedTime);
   const parsedServiceItems = parseBookingServiceItems(req.body?.serviceItems ?? req.body?.selectedServices);
   const serviceItems = parsedServiceItems.length > 0
     ? parsedServiceItems
@@ -304,13 +320,13 @@ publicRoutes.post('/bookings', async (req, res) => {
     return res.status(400).json({ error: 'Data inválida. Use YYYY-MM-DD.' });
   }
 
-  if (typeof time !== 'string' || !TIME_REGEX.test(normalizedTime)) {
-    return res.status(400).json({ error: 'Horário inválido. Use HH:mm.' });
+  if (!normalizedTime) {
+    return res.status(400).json({ error: 'Horario invalido. Use HH:mm.' });
   }
 
   try {
     const constraints = await getAvailabilityConstraints(date);
-    if (constraints.allowedSlots && !constraints.allowedSlots.has(normalizedTime)) {
+    if (constraints.allowedSlots && !constraints.allowedSlots.has(normalizedMinuteSlot)) {
       return res.status(409).json({ error: 'Horario indisponivel pelas regras de disponibilidade.' });
     }
 
@@ -337,7 +353,7 @@ publicRoutes.post('/bookings', async (req, res) => {
       console.error('Erro ao validar conflito via Calendar API:', error);
     }
 
-    if (remoteBusySlots.has(normalizedTime)) {
+    if (Array.from(remoteBusySlots).some((slot) => toMinuteSlot(slot) === normalizedMinuteSlot)) {
       return res.status(409).json({ error: 'Horário indisponível na agenda.' });
     }
 

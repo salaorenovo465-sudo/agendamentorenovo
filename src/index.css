@@ -265,6 +265,11 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   grid-template-columns: minmax(300px, 1fr) minmax(260px, 0.82fr);
   gap: clamp(0.9rem, 1.8vw, 1.25rem);
   align-items: start;
+  transition: grid-template-columns 260ms ease;
+}
+
+.booking-step-schedule-date-compact {
+  grid-template-columns: minmax(210px, 0.58fr) minmax(420px, 1.42fr);
 }
 
 .booking-step-details {
@@ -397,10 +402,213 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   box-shadow: 0 -12px 28px -28px rgba(28, 24, 21, 0.35);
 }
 
-.booking-time-highlight,
-.booking-time-option,
-.booking-time-spacer {
-  height: 4.5rem;
+.booking-calendar-section-compact {
+  align-self: start;
+}
+
+.booking-calendar-panel-compact {
+  padding: 0.85rem;
+}
+
+.booking-compact-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.7rem;
+}
+
+.booking-compact-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #c2a679;
+  background: rgba(194, 166, 121, 0.12);
+}
+
+.booking-compact-card span {
+  display: block;
+  color: rgba(117, 100, 82, 0.72);
+  font-size: 0.58rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.booking-compact-card strong {
+  display: block;
+  color: #2f281f;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.booking-compact-card button,
+.booking-time-grid-label button {
+  border: 1px solid rgba(194, 166, 121, 0.28);
+  border-radius: 999px;
+  padding: 0.36rem 0.58rem;
+  color: #8a6f48;
+  background: rgba(255, 255, 255, 0.7);
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.booking-time-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(194, 166, 121, 0.18);
+}
+
+.booking-time-summary div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.booking-time-summary span,
+.booking-time-grid-label {
+  color: rgba(117, 100, 82, 0.72);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.booking-time-summary strong {
+  color: #2f281f;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.booking-time-summary small {
+  max-width: 12rem;
+  color: #9f4339;
+  font-size: 0.68rem;
+  font-weight: 700;
+  line-height: 1.25;
+  text-align: right;
+}
+
+.booking-time-stage-card {
+  display: grid;
+  gap: 0.62rem;
+  padding: 0.78rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.46);
+  border: 1px solid rgba(194, 166, 121, 0.14);
+  transition: padding 220ms ease, background 220ms ease;
+}
+
+.booking-time-stage-card + .booking-time-stage-card {
+  margin-top: 0.82rem;
+}
+
+.booking-time-stage-card-compact {
+  padding: 0.62rem 0.72rem;
+}
+
+.booking-time-stage-card-open {
+  background: rgba(255, 255, 255, 0.64);
+  border-color: rgba(194, 166, 121, 0.2);
+}
+
+.booking-time-grid-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.booking-time-grid-label button {
+  margin-left: auto;
+}
+
+.booking-time-picked-row {
+  min-height: 2.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.booking-time-picked-row strong {
+  width: 2.7rem;
+  height: 2.2rem;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: #c2a679;
+  font-size: 0.82rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.booking-time-picked-row span {
+  color: rgba(117, 100, 82, 0.72);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.booking-time-grid {
+  display: grid;
+  gap: 0.38rem;
+}
+
+.booking-time-grid-minutes {
+  max-height: 14.4rem;
+  overflow-y: auto;
+  padding-right: 0.18rem;
+}
+
+.booking-time-grid-hours {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.booking-time-grid-minutes {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.booking-time-cell {
+  min-height: 2.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(47, 40, 31, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: #2f281f;
+  font-size: 0.78rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.booking-time-cell:hover {
+  transform: translateY(-1px);
+  border-color: rgba(194, 166, 121, 0.38);
+  background: #fff;
+  box-shadow: 0 12px 24px -22px rgba(47, 40, 31, 0.45);
+}
+
+.booking-time-cell-active {
+  border-color: rgba(194, 166, 121, 0.76);
+  background: #c2a679;
+  color: #fff;
+  box-shadow: 0 10px 22px -18px rgba(47, 40, 31, 0.5);
+}
+
+.booking-time-cell-disabled {
+  color: rgba(117, 100, 82, 0.28);
+  background: rgba(255, 255, 255, 0.34);
+  border-color: rgba(159, 67, 57, 0.16);
+  cursor: not-allowed;
+  text-decoration: line-through;
 }
 
 @media (max-width: 1020px) {
@@ -410,6 +618,10 @@ h1, h2, h3, h4, h5, h6, .font-serif {
 
   .booking-step-schedule {
     grid-template-columns: minmax(0, 1fr) minmax(240px, 0.76fr);
+  }
+
+  .booking-step-schedule-date-compact {
+    grid-template-columns: minmax(190px, 0.58fr) minmax(320px, 1.42fr);
   }
 }
 
@@ -534,15 +746,43 @@ h1, h2, h3, h4, h5, h6, .font-serif {
     padding: 0.85rem 0.7rem;
   }
 
-  .booking-time-highlight,
-  .booking-time-option,
-  .booking-time-spacer {
-    height: 3.35rem;
+  .booking-time-summary {
+    margin-bottom: 0.7rem;
+    padding: 0.58rem 0.65rem;
   }
 
-  .booking-time-wheel,
-  .booking-time-separator {
-    height: 8.6rem;
+  .booking-time-summary strong {
+    font-size: 1.1rem;
+  }
+
+  .booking-time-summary small {
+    max-width: 10rem;
+    font-size: 0.6rem;
+  }
+
+  .booking-calendar-panel-compact {
+    padding: 0.62rem;
+  }
+
+  .booking-time-stage-card {
+    padding: 0.58rem;
+  }
+
+  .booking-time-grid {
+    gap: 0.28rem;
+  }
+
+  .booking-time-grid-minutes {
+    max-height: 10.8rem;
+  }
+
+  .booking-time-grid-hours {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .booking-time-cell {
+    min-height: 2.05rem;
+    font-size: 0.7rem;
   }
 
   .booking-modal-footer {

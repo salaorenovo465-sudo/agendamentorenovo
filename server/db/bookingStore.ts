@@ -23,8 +23,10 @@ const BLOCKING_STATUSES: BookingStatus[] = ['pending', 'confirmed'];
 
 const bookingMutex = new Map<string, Promise<unknown>>();
 
+const toMinuteSlot = (time: string): string => time.slice(0, 5);
+
 const withBookingLock = async <T>(date: string, time: string, fn: () => Promise<T>): Promise<T> => {
-  const key = `${date}:${time}`;
+  const key = `${date}:${toMinuteSlot(time)}`;
   const previous = bookingMutex.get(key);
   const lock = (previous || Promise.resolve()).then(fn, fn).finally(() => {
     if (bookingMutex.get(key) === lock) {
@@ -355,12 +357,14 @@ class BookingStore {
   }
 
   async hasConflict(date: string, time: string, excludeId?: number): Promise<boolean> {
+    const minuteSlot = toMinuteSlot(time);
+
     if (this.supabaseEnabled && this.supabase) {
       let query = this.supabase
         .from('bookings')
         .select('id')
         .eq('date', date)
-        .eq('time', time)
+        .like('time', `${minuteSlot}%`)
         .in('status', BLOCKING_STATUSES)
         .limit(1);
 
@@ -377,15 +381,15 @@ class BookingStore {
     if (typeof excludeId === 'number') {
       const row = this.sqlite
         .prepare(
-          `SELECT id FROM bookings WHERE date = ? AND time = ? AND status IN (${statusPlaceholders}) AND id != ? LIMIT 1`,
+          `SELECT id FROM bookings WHERE date = ? AND substr(time, 1, 5) = ? AND status IN (${statusPlaceholders}) AND id != ? LIMIT 1`,
         )
-        .get(date, time, ...BLOCKING_STATUSES, excludeId) as { id: number } | undefined;
+        .get(date, minuteSlot, ...BLOCKING_STATUSES, excludeId) as { id: number } | undefined;
       return Boolean(row);
     }
 
     const row = this.sqlite
-      .prepare(`SELECT id FROM bookings WHERE date = ? AND time = ? AND status IN (${statusPlaceholders}) LIMIT 1`)
-      .get(date, time, ...BLOCKING_STATUSES) as { id: number } | undefined;
+      .prepare(`SELECT id FROM bookings WHERE date = ? AND substr(time, 1, 5) = ? AND status IN (${statusPlaceholders}) LIMIT 1`)
+      .get(date, minuteSlot, ...BLOCKING_STATUSES) as { id: number } | undefined;
 
     return Boolean(row);
   }
