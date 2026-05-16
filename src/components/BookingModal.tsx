@@ -130,6 +130,27 @@ export default function BookingModal({
   const isStep2Valid = bookingData.name.length > 2 && normalizePhoneDigits(bookingData.phone).length >= 12;
   const currentCategoryServices = services.find(c => c.category === selectedCategory)?.items || [];
   const isDateCompact = Boolean(bookingData.date) && !isDateCardExpanded;
+  const hasCategory = Boolean(selectedCategory);
+  const hasService = selectedServices.length > 0;
+  const hasDate = Boolean(bookingData.date);
+
+  const clearSchedule = () => {
+    setIsDateCardExpanded(true);
+    setBookingData((current) => ({ ...current, date: '', time: '' }));
+  };
+
+  const handleCategoryChange = (category: string) => {
+    setSelectedCategory(category);
+    setIsDateCardExpanded(true);
+    setBookingData((current) => ({
+      ...current,
+      selectedServices: [],
+      service: '',
+      servicePrice: '',
+      date: '',
+      time: '',
+    }));
+  };
 
   const toggleService = (service: { name: string; price: string }) => {
     if (!selectedCategory) return;
@@ -147,8 +168,11 @@ export default function BookingModal({
         selectedServices: nextServices,
         service: nextSummary.service,
         servicePrice: nextSummary.servicePrice,
+        date: '',
+        time: '',
       };
     });
+    setIsDateCardExpanded(true);
   };
 
   const removeSelectedService = (serviceName: string) => {
@@ -161,8 +185,11 @@ export default function BookingModal({
         selectedServices: nextServices,
         service: nextSummary.service,
         servicePrice: nextSummary.servicePrice,
+        date: '',
+        time: '',
       };
     });
+    setIsDateCardExpanded(true);
   };
 
   return (
@@ -218,11 +245,11 @@ export default function BookingModal({
           </div>
 
           {step === 1 && (
-            <div className="booking-step-one animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="booking-step-one booking-step-one-guided animate-in fade-in slide-in-from-bottom-4 duration-500">
               {/* Sticky Header for Category/Service */}
               <div className="booking-step-services">
               <div className="booking-service-panel lg:sticky lg:top-0 bg-luxury-white/95 backdrop-blur-md z-20 border border-luxury-gold/10 shadow-[0_12px_40px_-24px_rgba(28,24,21,0.25)] transition-all duration-300">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className={`grid grid-cols-1 ${hasCategory ? 'sm:grid-cols-2' : ''} gap-4`}>
                   {/* Category Selection */}
                   <div className="space-y-2">
                     <label className="text-[9px] tracking-[0.2em] uppercase text-luxury-muted font-bold flex items-center gap-2">
@@ -230,10 +257,10 @@ export default function BookingModal({
                     </label>
                     <div className="relative group">
                        <select
-	                         value={selectedCategory}
-	                         onChange={(e) => {
-	                           setSelectedCategory(e.target.value);
-	                         }}
+                         value={selectedCategory}
+                         onChange={(e) => {
+                           handleCategoryChange(e.target.value);
+                         }}
                          className="w-full appearance-none bg-luxury-light/70 border border-luxury-dark/8 rounded-xl px-4 py-3 text-xs text-luxury-dark font-semibold focus:outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/10 transition-all cursor-pointer hover:border-luxury-gold/30 hover:shadow-sm"
                        >
                         <option value="" disabled>Escolha...</option>
@@ -247,20 +274,22 @@ export default function BookingModal({
                     </div>
                   </div>
 
-                  {/* Multi-service summary */}
-                  <div className="space-y-2">
-                    <label className="text-[9px] tracking-[0.2em] uppercase text-luxury-muted font-bold flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full transition-colors ${selectedServices.length ? 'bg-luxury-gold' : 'bg-luxury-muted/30'}`}></div> Servicos
-                    </label>
-                    <div className="booking-multi-summary">
-                      <strong>{serviceSummary.countLabel}</strong>
-                      <span>{serviceSummary.servicePrice || 'Escolha um ou mais servicos'}</span>
+                  {hasCategory && (
+                    <div className="space-y-2">
+                      <label className="text-[9px] tracking-[0.2em] uppercase text-luxury-muted font-bold flex items-center gap-2">
+                        <div className={`w-1.5 h-1.5 rounded-full transition-colors ${selectedServices.length ? 'bg-luxury-gold' : 'bg-luxury-muted/30'}`}></div> Servicos
+                      </label>
+                      <div className="booking-multi-summary">
+                        <strong>{serviceSummary.countLabel}</strong>
+                        <span>{serviceSummary.servicePrice || 'Escolha um ou mais servicos'}</span>
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
 
+                {hasCategory && (
                 <div className="booking-service-picker">
-                  {selectedCategory ? (
+                  {currentCategoryServices.length > 0 ? (
                     currentCategoryServices.map((item) => {
                       const isSelected = selectedServices.some((service) => service.name === item.name);
                       return (
@@ -277,9 +306,10 @@ export default function BookingModal({
                       );
                     })
                   ) : (
-                    <div className="booking-service-empty">Escolha uma categoria para adicionar um ou mais servicos.</div>
+                    <div className="booking-service-empty">Nenhum servico cadastrado nesta categoria.</div>
                   )}
                 </div>
+                )}
 
                 {selectedServices.length > 0 && (
                   <div className="booking-selected-services">
@@ -294,7 +324,8 @@ export default function BookingModal({
               </div>
               </div>
 
-              <div className={`booking-step-schedule ${isDateCompact ? 'booking-step-schedule-date-compact' : ''}`}>
+              {hasService && (
+              <div className={`booking-step-schedule ${!hasDate ? 'booking-step-schedule-date-only' : ''} ${isDateCompact ? 'booking-step-schedule-date-compact' : ''}`}>
               {/* Date Selection */}
               <div className={`booking-flow-section booking-calendar-section space-y-3 ${isDateCompact ? 'booking-calendar-section-compact' : ''}`}>
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
@@ -309,11 +340,15 @@ export default function BookingModal({
                   availabilityByDate={monthAvailability}
                   isLoadingAvailability={isLoadingMonthAvailability}
                   onDateSelected={() => setIsDateCardExpanded(false)}
-                  onEditDate={() => setIsDateCardExpanded(true)}
+                  onEditDate={() => {
+                    clearSchedule();
+                    setIsDateCardExpanded(true);
+                  }}
                 />
               </div>
 
               {/* Time Selection */}
+              {hasDate && (
               <div className="booking-flow-section booking-time-section space-y-3">
                 <label className="text-xs tracking-widest uppercase text-luxury-muted font-medium flex items-center gap-2">
                   <Clock className="w-4 h-4 text-luxury-gold" /> Escolha o Horário
@@ -327,7 +362,9 @@ export default function BookingModal({
                   isLoadingSlots={isLoadingSlots}
                 />
               </div>
+              )}
               </div>
+              )}
             </div>
           )}
 

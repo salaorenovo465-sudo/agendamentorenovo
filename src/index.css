@@ -252,6 +252,11 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   align-items: start;
 }
 
+.booking-step-one-guided {
+  grid-template-columns: minmax(0, 980px);
+  justify-content: center;
+}
+
 .booking-step-services,
 .booking-step-schedule,
 .booking-flow-section,
@@ -266,6 +271,10 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   gap: clamp(0.9rem, 1.8vw, 1.25rem);
   align-items: start;
   transition: grid-template-columns 260ms ease;
+}
+
+.booking-step-schedule-date-only {
+  grid-template-columns: minmax(0, 420px);
 }
 
 .booking-step-schedule-date-compact {
