@@ -9,18 +9,37 @@ type ServiceCategory = {
   items: Array<{ name: string; price: string; desc?: string; durationMin?: number; image?: string }>;
 };
 
-const fetchBookedSlotsForDate = async (dateStr: string): Promise<string[]> => {
+type AvailabilityResponse = {
+  busySlots: string[];
+  availableSlots: string[];
+  dateAvailable: boolean;
+  limitReached?: boolean;
+};
+
+const emptyAvailability = (): AvailabilityResponse => ({
+  busySlots: [],
+  availableSlots: [],
+  dateAvailable: false,
+  limitReached: false,
+});
+
+const fetchAvailabilityForDate = async (dateStr: string): Promise<AvailabilityResponse> => {
   try {
     const response = await fetch(apiUrl(`/api/availability?date=${encodeURIComponent(dateStr)}`));
     if (!response.ok) {
-      if (response.status === 500) return []; // Possivelmente sem tokens ainda
+      if (response.status === 500) return emptyAvailability(); // Possivelmente sem tokens ainda
       throw new Error('Falha ao buscar agenda');
     }
     const data = await response.json();
-    return data.busySlots || [];
+    return {
+      busySlots: Array.isArray(data.busySlots) ? data.busySlots : [],
+      availableSlots: Array.isArray(data.availableSlots) ? data.availableSlots : [],
+      dateAvailable: data.dateAvailable === true,
+      limitReached: data.limitReached === true,
+    };
   } catch (error) {
     console.error('Erro na API de disponibilidade:', error);
-    return [];
+    return emptyAvailability();
   }
 };
 
@@ -99,6 +118,10 @@ export default function App() {
   });
   const [currentMonthDate, setCurrentMonthDate] = useState(new Date());
   const [bookedSlots, setBookedSlots] = useState<string[]>([]);
+  const [availableSlots, setAvailableSlots] = useState<string[]>([]);
+  const [selectedDateAvailable, setSelectedDateAvailable] = useState(false);
+  const [monthAvailability, setMonthAvailability] = useState<Record<string, boolean>>({});
+  const [isLoadingMonthAvailability, setIsLoadingMonthAvailability] = useState(false);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [bookingError, setBookingError] = useState('');
   const [bookingSuccess, setBookingSuccess] = useState(false);
@@ -119,17 +142,54 @@ export default function App() {
     let active = true;
     if (bookingData.date) {
       setIsLoadingSlots(true);
-      fetchBookedSlotsForDate(bookingData.date).then(slots => {
+      fetchAvailabilityForDate(bookingData.date).then((availability) => {
         if (active) {
-          setBookedSlots(slots);
+          setBookedSlots(availability.busySlots);
+          setAvailableSlots(availability.availableSlots);
+          setSelectedDateAvailable(availability.dateAvailable);
           setIsLoadingSlots(false);
         }
       });
     } else {
       setBookedSlots([]);
+      setAvailableSlots([]);
+      setSelectedDateAvailable(false);
     }
     return () => { active = false; };
   }, [bookingData.date]);
+
+  useEffect(() => {
+    if (!isModalOpen) return;
+
+    let active = true;
+    const year = currentMonthDate.getFullYear();
+    const month = currentMonthDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dates = Array.from({ length: daysInMonth }, (_, i) => {
+      const day = i + 1;
+      const dateObj = new Date(year, month, day);
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      return { dateObj, dateStr };
+    }).filter(({ dateObj }) => dateObj >= today && dateObj.getDay() !== 0);
+
+    setIsLoadingMonthAvailability(true);
+    Promise.all(dates.map(async ({ dateStr }) => {
+      const availability = await fetchAvailabilityForDate(dateStr);
+      return [dateStr, availability.dateAvailable] as const;
+    })).then((entries) => {
+      if (!active) return;
+      setMonthAvailability(Object.fromEntries(entries));
+      setIsLoadingMonthAvailability(false);
+    }).catch(() => {
+      if (!active) return;
+      setMonthAvailability({});
+      setIsLoadingMonthAvailability(false);
+    });
+
+    return () => { active = false; };
+  }, [currentMonthDate, isModalOpen]);
 
   const handleOpenBooking = () => {
     setStep(1);
@@ -221,6 +281,10 @@ export default function App() {
         currentMonthDate={currentMonthDate}
         setCurrentMonthDate={setCurrentMonthDate}
         bookedSlots={bookedSlots}
+        availableSlots={availableSlots}
+        selectedDateAvailable={selectedDateAvailable}
+        monthAvailability={monthAvailability}
+        isLoadingMonthAvailability={isLoadingMonthAvailability}
         isLoadingSlots={isLoadingSlots}
         bookingSuccess={bookingSuccess}
         bookingError={bookingError}

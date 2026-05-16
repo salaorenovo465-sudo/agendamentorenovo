@@ -15,6 +15,8 @@ interface TimePickerProps {
   bookingData: BookingData;
   setBookingData: React.Dispatch<React.SetStateAction<BookingData>>;
   bookedSlots: string[];
+  availableSlots: string[];
+  dateAvailable: boolean;
   isLoadingSlots: boolean;
 }
 
@@ -32,7 +34,14 @@ const parseTimeParts = (time: string): { hour: string; minute: string } => {
 
 const toMinuteSlot = (time: string): string => time.split(':').slice(0, 2).join(':');
 
-export default function TimePicker({ bookingData, setBookingData, bookedSlots, isLoadingSlots }: TimePickerProps) {
+export default function TimePicker({
+  bookingData,
+  setBookingData,
+  bookedSlots,
+  availableSlots,
+  dateAvailable,
+  isLoadingSlots,
+}: TimePickerProps) {
   const [selectedHour, setSelectedHour] = useState<string>('');
 
   useEffect(() => {
@@ -63,12 +72,24 @@ export default function TimePicker({ bookingData, setBookingData, bookedSlots, i
     );
   }
 
+  if (!dateAvailable || availableSlots.length === 0) {
+    return (
+      <div className="py-6 text-center text-sm font-medium text-luxury-muted/70 bg-luxury-light/30 rounded-lg border border-dashed border-luxury-dark/8">
+        <Clock className="w-5 h-5 mx-auto mb-2 text-luxury-gold/40" />
+        Nao ha horarios liberados para esta data
+      </div>
+    );
+  }
+
   const selectedTime = parseTimeParts(bookingData.time);
   const activeHour = selectedHour || selectedTime.hour;
   const selectedMinuteSlot = `${activeHour}:${selectedTime.minute}`;
   const isSelectedMinuteBooked = bookedSlots.includes('all') || bookedSlots.some((slot) => toMinuteSlot(slot) === selectedMinuteSlot);
+  const isMinuteAvailable = (minuteSlot: string): boolean => availableSlots.includes(minuteSlot);
+  const isHourAvailable = (hour: string): boolean => availableSlots.some((slot) => slot.startsWith(`${hour}:`));
 
   const chooseHour = (hour: string) => {
+    if (!isHourAvailable(hour)) return;
     setSelectedHour(hour);
     setBookingData((current) => {
       return {
@@ -124,8 +145,9 @@ export default function TimePicker({ bookingData, setBookingData, bookedSlots, i
               <button
                 key={hour}
                 type="button"
+                disabled={!isHourAvailable(hour)}
                 onClick={() => chooseHour(hour)}
-                className="booking-time-cell"
+                className={`booking-time-cell ${!isHourAvailable(hour) ? 'booking-time-cell-disabled' : ''}`}
               >
                 {hour}
               </button>
@@ -143,15 +165,16 @@ export default function TimePicker({ bookingData, setBookingData, bookedSlots, i
             {MINUTES.map((minute) => {
               const minuteSlot = `${selectedHour}:${minute}`;
               const isBooked = bookedSlots.includes('all') || bookedSlots.some((slot) => toMinuteSlot(slot) === minuteSlot);
+              const isUnavailable = !isMinuteAvailable(minuteSlot);
               const isSelected = bookingData.time === minuteSlot;
           return (
             <button
                   key={minute}
               type="button"
-              disabled={isBooked}
+              disabled={isBooked || isUnavailable}
                   onClick={() => chooseMinute(minute)}
               className={`booking-time-cell ${
-                isBooked
+                isBooked || isUnavailable
                   ? 'booking-time-cell-disabled'
                   : isSelected
                     ? 'booking-time-cell-active'

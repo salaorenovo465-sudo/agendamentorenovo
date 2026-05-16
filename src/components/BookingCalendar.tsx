@@ -17,6 +17,8 @@ interface BookingCalendarProps {
   bookingData: BookingData;
   setBookingData: React.Dispatch<React.SetStateAction<BookingData>>;
   compact?: boolean;
+  availabilityByDate?: Record<string, boolean>;
+  isLoadingAvailability?: boolean;
   onDateSelected?: () => void;
   onEditDate?: () => void;
 }
@@ -27,6 +29,8 @@ export default function BookingCalendar({
   bookingData,
   setBookingData,
   compact = false,
+  availabilityByDate = {},
+  isLoadingAvailability = false,
   onDateSelected,
   onEditDate,
 }: BookingCalendarProps) {
@@ -98,10 +102,13 @@ export default function BookingCalendar({
           const isPast = dateObj < today;
           const isToday = dateObj.getTime() === today.getTime();
           const isSunday = dateObj.getDay() === 0;
-          const isUnavailable = isPast || isSunday;
 
           const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
           const isSelected = bookingData.date === dateStr;
+          const isUnavailableByAgenda = availabilityByDate[dateStr] === false;
+          const isPendingAvailability =
+            isLoadingAvailability && !Object.prototype.hasOwnProperty.call(availabilityByDate, dateStr) && !isPast && !isSunday;
+          const isUnavailable = isPast || isSunday || isUnavailableByAgenda;
 
           return (
             <button
@@ -118,14 +125,18 @@ export default function BookingCalendar({
                   : isUnavailable
                     ? 'text-luxury-muted/20 cursor-not-allowed'
                     : isToday
-                      ? 'text-luxury-gold font-bold hover:bg-luxury-gold/15 cursor-pointer'
-                      : 'text-luxury-dark hover:bg-luxury-gold/10 cursor-pointer'
+                      ? 'booking-calendar-day-available text-luxury-gold font-bold hover:bg-luxury-gold/15 cursor-pointer'
+                      : 'booking-calendar-day-available text-luxury-dark hover:bg-luxury-gold/10 cursor-pointer'
               }`}
             >
               <div className="w-7 h-7 flex items-center justify-center">
                 {day}
               </div>
               {isToday && !isSelected && <div className="w-1 h-1 rounded-full bg-luxury-gold mt-[-2px]"></div>}
+              {!isUnavailable && availabilityByDate[dateStr] === true && !isSelected && !isToday && (
+                <div className="booking-calendar-availability-dot"></div>
+              )}
+              {isPendingAvailability && !isSelected && <div className="w-1 h-1 rounded-full bg-luxury-muted/30 mt-[-2px]"></div>}
             </button>
           );
         })}

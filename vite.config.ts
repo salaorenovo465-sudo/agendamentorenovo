@@ -6,7 +6,7 @@ import {defineConfig, loadEnv} from 'vite';
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, process.cwd(), '');
   const appBasePath = (env.VITE_APP_BASE_PATH || '').trim().replace(/^\/+|\/+$/g, '');
-  const devApiProxyTarget = (env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:3001').trim();
+  const devApiProxyTarget = (env.VITE_DEV_API_PROXY_TARGET || 'http://localhost:3101').trim();
 
   return {
     base: appBasePath ? `/${appBasePath}/` : '/',

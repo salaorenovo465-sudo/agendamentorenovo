@@ -21,6 +21,8 @@ import { normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}$/;
 const TENANT_REGEX = /^[a-z0-9-]{2,50}$/;
+const DEFAULT_OPEN_START_MINUTE = 8 * 60;
+const DEFAULT_OPEN_END_MINUTE = 21 * 60;
 
 const parseTenantFromQuery = (value: unknown): string | null => {
   if (typeof value !== 'string') {
@@ -49,6 +51,35 @@ const normalizeBookingTime = (value: unknown): string => {
 };
 
 const toMinuteSlot = (time: string): string => time.slice(0, 5);
+
+const formatMinuteSlot = (totalMinutes: number): string => {
+  const h = Math.floor(totalMinutes / 60);
+  const min = totalMinutes % 60;
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+};
+
+const parseTimeToMinute = (value: string | null): number | null => {
+  if (!value) return null;
+  const [hour, minute] = value.split(':').map(Number);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  return hour * 60 + minute;
+};
+
+const buildMinuteSlots = (startMinute: number, endMinute: number): Set<string> => {
+  const slots = new Set<string>();
+  for (let current = startMinute; current < endMinute; current += 1) {
+    slots.add(formatMinuteSlot(current));
+  }
+  return slots;
+};
+
+const isPastLocalDate = (date: string): boolean => {
+  const dateObj = new Date(`${date}T12:00:00`);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  dateObj.setHours(0, 0, 0, 0);
+  return dateObj < today;
+};
 
 const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
   if (!Array.isArray(value)) {
@@ -82,15 +113,33 @@ const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
  * or null if no rules are defined (meaning all slots are allowed).
  */
 const getAvailabilityConstraints = async (date: string): Promise<{
-  allowedSlots: Set<string> | null;
+  allowedSlots: Set<string>;
   limitPerDay: number | null;
+  hasConfiguredRules: boolean;
 }> => {
   const dateObj = new Date(date + 'T12:00:00');
   const weekday = dateObj.getDay(); // 0=Sunday, 6=Saturday
 
-  const rules = await workbenchStore.getActiveAvailabilityRules(weekday);
+  if (isPastLocalDate(date) || weekday === 0) {
+    return {
+      allowedSlots: new Set<string>(),
+      limitPerDay: null,
+      hasConfiguredRules: true,
+    };
+  }
+
+  const [allRules, rules] = await Promise.all([
+    workbenchStore.getActiveAvailabilityRules(),
+    workbenchStore.getActiveAvailabilityRules(weekday),
+  ]);
+  const hasConfiguredRules = allRules.length > 0;
+
   if (rules.length === 0) {
-    return { allowedSlots: null, limitPerDay: null };
+    return {
+      allowedSlots: hasConfiguredRules ? new Set<string>() : buildMinuteSlots(DEFAULT_OPEN_START_MINUTE, DEFAULT_OPEN_END_MINUTE),
+      limitPerDay: null,
+      hasConfiguredRules,
+    };
   }
 
   const allowedSlots = new Set<string>();
@@ -106,23 +155,18 @@ const getAvailabilityConstraints = async (date: string): Promise<{
     }
 
     if (startTime && endTime) {
-      // Generate hourly slots between start_time and end_time
-      const [startH, startM] = startTime.split(':').map(Number);
-      const [endH, endM] = endTime.split(':').map(Number);
-      const startMinutes = startH * 60 + (startM || 0);
-      const endMinutes = endH * 60 + (endM || 0);
-
-      for (let m = startMinutes; m < endMinutes; m += 60) {
-        const h = Math.floor(m / 60);
-        const min = m % 60;
-        allowedSlots.add(`${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+      const startMinutes = parseTimeToMinute(startTime);
+      const endMinutes = parseTimeToMinute(endTime);
+      if (startMinutes !== null && endMinutes !== null && endMinutes > startMinutes) {
+        buildMinuteSlots(startMinutes, endMinutes).forEach((slot) => allowedSlots.add(slot));
       }
     }
   }
 
   return {
-    allowedSlots: allowedSlots.size > 0 ? allowedSlots : null,
+    allowedSlots,
     limitPerDay,
+    hasConfiguredRules,
   };
 };
 
@@ -260,32 +304,32 @@ publicRoutes.get('/availability', async (req, res) => {
     }
 
     const busySlots = Array.from(new Set([...remoteBusySlots, ...localBusySlots])).sort();
+    const busyMinuteSlots = new Set(busySlots.map(toMinuteSlot));
+    const availableSlots = Array.from(constraints.allowedSlots)
+      .filter((slot) => !busyMinuteSlots.has(slot))
+      .sort();
 
     // If limit_per_day is set and we've reached it, mark all slots as busy
     if (constraints.limitPerDay) {
       const bookingsOnDate = await bookingStore.countByDate(date);
       if (bookingsOnDate >= constraints.limitPerDay) {
-        return res.json({ busySlots: ['all'], limitReached: true });
+        return res.json({
+          busySlots: ['all'],
+          availableSlots: [],
+          dateAvailable: false,
+          limitReached: true,
+          availabilityConfigured: constraints.hasConfiguredRules,
+        });
       }
     }
 
-    // If availability rules define allowed slots, add non-allowed slots to busy
-    const disallowedSlots: string[] = [];
-    if (constraints.allowedSlots) {
-      // Common salon time slots
-      const allPossibleSlots = [
-        '08:00', '09:00', '10:00', '11:00', '12:00',
-        '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00',
-      ];
-      for (const slot of allPossibleSlots) {
-        if (!constraints.allowedSlots.has(slot)) {
-          disallowedSlots.push(slot);
-        }
-      }
-    }
-
-    const allBusySlots = Array.from(new Set([...busySlots, ...disallowedSlots])).sort();
-    return res.json({ busySlots: allBusySlots });
+    return res.json({
+      busySlots,
+      availableSlots,
+      dateAvailable: availableSlots.length > 0,
+      limitReached: false,
+      availabilityConfigured: constraints.hasConfiguredRules,
+    });
   } catch (error) {
     console.error('Erro ao consultar disponibilidade:', error);
     return res.status(500).json({ error: 'Erro ao consultar disponibilidade.' });
@@ -326,7 +370,7 @@ publicRoutes.post('/bookings', async (req, res) => {
 
   try {
     const constraints = await getAvailabilityConstraints(date);
-    if (constraints.allowedSlots && !constraints.allowedSlots.has(normalizedMinuteSlot)) {
+    if (!constraints.allowedSlots.has(normalizedMinuteSlot)) {
       return res.status(409).json({ error: 'Horario indisponivel pelas regras de disponibilidade.' });
     }
 

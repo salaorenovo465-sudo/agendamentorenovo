@@ -38,6 +38,10 @@ interface BookingModalProps {
   currentMonthDate: Date;
   setCurrentMonthDate: React.Dispatch<React.SetStateAction<Date>>;
   bookedSlots: string[];
+  availableSlots: string[];
+  selectedDateAvailable: boolean;
+  monthAvailability: Record<string, boolean>;
+  isLoadingMonthAvailability: boolean;
   isLoadingSlots: boolean;
   bookingSuccess: boolean;
   bookingError: string;
@@ -105,6 +109,10 @@ export default function BookingModal({
   currentMonthDate,
   setCurrentMonthDate,
   bookedSlots,
+  availableSlots,
+  selectedDateAvailable,
+  monthAvailability,
+  isLoadingMonthAvailability,
   isLoadingSlots,
   bookingSuccess,
   bookingError,
@@ -298,6 +306,8 @@ export default function BookingModal({
                   bookingData={bookingData}
                   setBookingData={setBookingData}
                   compact={isDateCompact}
+                  availabilityByDate={monthAvailability}
+                  isLoadingAvailability={isLoadingMonthAvailability}
                   onDateSelected={() => setIsDateCardExpanded(false)}
                   onEditDate={() => setIsDateCardExpanded(true)}
                 />
@@ -312,6 +322,8 @@ export default function BookingModal({
                   bookingData={bookingData}
                   setBookingData={setBookingData}
                   bookedSlots={bookedSlots}
+                  availableSlots={availableSlots}
+                  dateAvailable={selectedDateAvailable}
                   isLoadingSlots={isLoadingSlots}
                 />
               </div>

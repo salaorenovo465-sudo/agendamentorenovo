@@ -75,7 +75,7 @@ Aplicacao React + backend Express para agendamento com:
 8. Configure CORS por allowlist:
    - `CORS_ORIGINS` (ex.: `http://localhost:3000,http://127.0.0.1:3000`)
 9. Frontend e API:
-   - em desenvolvimento, use `VITE_DEV_API_PROXY_TARGET` (padrão: `http://localhost:3001`)
+   - em desenvolvimento, use `VITE_DEV_API_PROXY_TARGET` (padrão: `http://localhost:3101`)
    - defina `VITE_API_URL` apenas quando frontend e backend estiverem em domínios diferentes
 10. Ajuste limites de taxa para rotas de WhatsApp admin (opcional):
    - `WHATSAPP_CONTROL_RATE_LIMIT_WINDOW_MS`

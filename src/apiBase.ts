@@ -17,6 +17,10 @@ const shouldIgnoreConfiguredApiBase = (configuredApiBase: string): boolean => {
       return true;
     }
 
+    if (isLoopbackHost(apiUrl.hostname) && isLoopbackHost(pageUrl.hostname) && apiUrl.origin !== pageUrl.origin) {
+      return true;
+    }
+
     // In deployed environments, always prefer same-origin requests so the
     // frontend goes through the app backend/proxy instead of calling external
     // APIs directly from the browser.

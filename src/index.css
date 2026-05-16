@@ -286,6 +286,25 @@ h1, h2, h3, h4, h5, h6, .font-serif {
   border-radius: 16px;
 }
 
+.booking-calendar-day-available {
+  color: #1c1815 !important;
+  font-weight: 700;
+  opacity: 1;
+}
+
+.booking-calendar-day-available:hover {
+  background: rgba(194, 166, 121, 0.12);
+}
+
+.booking-calendar-availability-dot {
+  width: 0.25rem;
+  height: 0.25rem;
+  margin-top: -2px;
+  border-radius: 999px;
+  background: #c2a679;
+  box-shadow: 0 0 0 3px rgba(194, 166, 121, 0.12);
+}
+
 .booking-service-panel {
   padding: clamp(1rem, 2.2vw, 1.25rem);
   margin-bottom: 0;
