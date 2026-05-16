@@ -133,6 +133,9 @@ export default function BookingModal({
   const hasCategory = Boolean(selectedCategory);
   const hasService = selectedServices.length > 0;
   const hasDate = Boolean(bookingData.date);
+  const availableCategoryServices = currentCategoryServices.filter((item) => (
+    !selectedServices.some((service) => service.name === item.name)
+  ));
 
   const clearSchedule = () => {
     setIsDateCardExpanded(true);
@@ -173,6 +176,12 @@ export default function BookingModal({
       };
     });
     setIsDateCardExpanded(true);
+  };
+
+  const handleServiceSelect = (serviceName: string) => {
+    const service = currentCategoryServices.find((item) => item.name === serviceName);
+    if (!service) return;
+    toggleService(service);
   };
 
   const removeSelectedService = (serviceName: string) => {
@@ -288,27 +297,32 @@ export default function BookingModal({
                 </div>
 
                 {hasCategory && (
-                <div className="booking-service-picker">
-                  {currentCategoryServices.length > 0 ? (
-                    currentCategoryServices.map((item) => {
-                      const isSelected = selectedServices.some((service) => service.name === item.name);
-                      return (
-                        <button
-                          key={item.name}
-                          type="button"
-                          onClick={() => toggleService(item)}
-                          className={`booking-service-option ${isSelected ? 'active' : ''}`}
+                  <div className="booking-service-select-panel">
+                    {currentCategoryServices.length > 0 ? (
+                      <div className="relative group">
+                        <select
+                          value=""
+                          onChange={(e) => handleServiceSelect(e.target.value)}
+                          className="w-full appearance-none bg-luxury-light/70 border border-luxury-dark/8 rounded-xl px-4 py-3 text-xs text-luxury-dark font-semibold focus:outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/10 transition-all cursor-pointer hover:border-luxury-gold/30 hover:shadow-sm"
+                          disabled={availableCategoryServices.length === 0}
                         >
-                          <span>{item.name}</span>
-                          <small>{item.price}</small>
-                          <CheckCircle className={`w-4 h-4 ${isSelected ? 'opacity-100' : 'opacity-20'}`} />
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div className="booking-service-empty">Nenhum servico cadastrado nesta categoria.</div>
-                  )}
-                </div>
+                          <option value="" disabled>
+                            {availableCategoryServices.length > 0 ? 'Escolha o servico...' : 'Todos os servicos desta categoria foram escolhidos'}
+                          </option>
+                          {availableCategoryServices.map((item) => (
+                            <option key={item.name} value={item.name}>
+                              {item.name} - {item.price}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-luxury-gold/60 group-hover:text-luxury-gold transition-colors">
+                          <ChevronRight className="w-3.5 h-3.5 rotate-90" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="booking-service-empty">Nenhum servico cadastrado nesta categoria.</div>
+                    )}
+                  </div>
                 )}
 
                 {selectedServices.length > 0 && (
