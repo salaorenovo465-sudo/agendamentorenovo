@@ -1,112 +1,30 @@
-import fs from 'fs';
-import { createRequire } from 'module';
-import os from 'os';
-import path from 'path';
-
 import '../loadEnv';
-import { inboxStore } from '../db/inboxStore';
+import { whatsappWorkspaceStore } from '../db/whatsappWorkspaceStore';
+import { workbenchStore } from '../db/workbenchStore';
+import { asObject, getString } from '../utils/helpers';
 import { normalizeWhatsappPhone, whatsappJidToPhone } from '../utils/phone';
+import { resolveTenantBridgeConfig } from './chatwootEvolutionBridge';
+import { evolutionApiRequest, fetchEvolutionInstances, resolveEvolutionInstance } from './evolutionApiService';
+import {
+  configureEvolutionWebhook,
+  createEvolutionInstance,
+  getEvolutionInstanceStatus,
+  logoutEvolutionInstance,
+  refreshEvolutionInstanceQr,
+  type EvolutionInstanceStatus,
+} from './evolutionInstanceService';
+import {
+  sendEvolutionAttachmentToCustomer,
+  sendEvolutionMessageToCustomer,
+  type EvolutionAttachmentInput,
+} from './evolutionIntegrationService';
 import { publishMessageStatus, publishWhatsappStateChanged } from './inboxRealtime';
 import {
   type OutgoingDeliveryStatus,
   setOutgoingDeliveryStatus,
 } from './whatsappDeliveryStatus';
 
-const require = createRequire(import.meta.url);
-
-type BaileysMessage = {
-  key: {
-    remoteJid?: string | null;
-    fromMe?: boolean;
-    id?: string | null;
-  };
-  message?: {
-    conversation?: string;
-    extendedTextMessage?: { text?: string | null };
-    imageMessage?: { caption?: string | null };
-    videoMessage?: { caption?: string | null };
-  } | null;
-  pushName?: string | null;
-};
-
-type BaileysConnectionState = {
-  qr?: string;
-  connection?: 'connecting' | 'open' | 'close' | string;
-  lastDisconnect?: {
-    error?: {
-      output?: {
-        statusCode?: number;
-      };
-    };
-  };
-};
-
-type BaileysMessagesUpsert = {
-  type?: string;
-  messages?: BaileysMessage[];
-};
-
-type BaileysSocket = {
-  user?: { id?: string | null } | null;
-  ws: { close: () => void | Promise<void> };
-  ev: {
-    on: (event: string, handler: (payload: unknown) => void) => void;
-  };
-  onWhatsApp: (phone: string) => Promise<Array<{ jid?: string | null; exists?: boolean }>>;
-  profilePictureUrl: (jid: string, type: 'image') => Promise<string>;
-  sendMessage: (jid: string, content: Record<string, unknown>) => Promise<{ key: { id?: string | null } }>;
-};
-
-type BaileysRuntime = {
-  makeWASocket: (options: Record<string, unknown>) => BaileysSocket;
-  fetchLatestBaileysVersion: () => Promise<{ version: unknown }>;
-  useMultiFileAuthState: (dir: string) => Promise<{ state: unknown; saveCreds: () => void | Promise<void> }>;
-  toDataURL: (value: string) => Promise<string>;
-  logger: unknown;
-  loggedOutStatusCode: number;
-};
-
-type BaileysModule = {
-  default: BaileysRuntime['makeWASocket'];
-  fetchLatestBaileysVersion: BaileysRuntime['fetchLatestBaileysVersion'];
-  useMultiFileAuthState: BaileysRuntime['useMultiFileAuthState'];
-  DisconnectReason?: { loggedOut?: number };
-};
-
-type QrCodeModule = {
-  toDataURL: BaileysRuntime['toDataURL'];
-};
-
-type PinoModule = {
-  default?: (options: Record<string, unknown>) => unknown;
-} & ((options: Record<string, unknown>) => unknown);
-
-const importOptional = (specifier: string): Promise<unknown> => import(specifier);
-
-const isOptionalDriverInstalled = (): boolean => {
-  try {
-    require.resolve('@whiskeysockets/baileys');
-    require.resolve('qrcode');
-    require.resolve('pino');
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const WHATSAPP_FEATURE_ENABLED = process.env.WHATSAPP_FEATURE_ENABLED === 'true';
-const BAILEYS_REQUESTED = WHATSAPP_FEATURE_ENABLED && process.env.BAILEYS_ENABLED !== 'false';
-const BAILEYS_DRIVER_AVAILABLE = BAILEYS_REQUESTED && isOptionalDriverInstalled();
-const BAILEYS_ENABLED = BAILEYS_REQUESTED && BAILEYS_DRIVER_AVAILABLE;
-const DEFAULT_BAILEYS_AUTH_DIR = path.resolve(os.homedir(), '.agendamentorenovo', 'baileys_auth');
-const BAILEYS_AUTH_DIR = process.env.BAILEYS_AUTH_DIR || DEFAULT_BAILEYS_AUTH_DIR;
-const BAILEYS_AUTO_CONNECT = process.env.BAILEYS_AUTO_CONNECT !== 'false';
-const BAILEYS_DISABLED_REASON = BAILEYS_REQUESTED && !BAILEYS_DRIVER_AVAILABLE
-  ? 'Driver Baileys legado nao instalado. Use Evolution API em producao.'
-  : 'WHATSAPP_FEATURE_ENABLED=false';
-
-const MASTER_SALON_WHATSAPP = normalizeWhatsappPhone('5571999542265');
-const BAILEYS_SALON_WHATSAPP = MASTER_SALON_WHATSAPP ? [MASTER_SALON_WHATSAPP] : [];
+export type WhatsappAttachmentInput = EvolutionAttachmentInput;
 
 type WhatsappConnectionState = 'disabled' | 'disconnected' | 'connecting' | 'qr' | 'connected';
 
@@ -119,8 +37,13 @@ type StoredWhatsappState = {
   lastUpdateAt: string;
 };
 
+const WHATSAPP_FEATURE_ENABLED = process.env.WHATSAPP_FEATURE_ENABLED !== 'false';
+const DEFAULT_TENANT_SLUG = (process.env.DEFAULT_TENANT_SLUG || 'renovo').trim().toLowerCase();
+const MASTER_SALON_WHATSAPP = normalizeWhatsappPhone(process.env.SALON_WHATSAPP || '5571999542265');
+const SALON_WHATSAPP_LIST = MASTER_SALON_WHATSAPP ? [MASTER_SALON_WHATSAPP] : [];
+
 const state: StoredWhatsappState = {
-  connectionState: BAILEYS_ENABLED ? 'disconnected' : 'disabled',
+  connectionState: WHATSAPP_FEATURE_ENABLED ? 'disconnected' : 'disabled',
   qr: null,
   qrDataUrl: null,
   connectedJid: null,
@@ -128,153 +51,88 @@ const state: StoredWhatsappState = {
   lastUpdateAt: new Date().toISOString(),
 };
 
-let socket: BaileysSocket | null = null;
-let connectPromise: Promise<void> | null = null;
-let manualDisconnect = false;
-let reconnectTimer: NodeJS.Timeout | null = null;
-let baileysRuntimePromise: Promise<BaileysRuntime | null> | null = null;
-
 type ContactAvatarCacheEntry = {
   url: string | null;
   expiresAt: number;
 };
 
-type ContactJidCacheEntry = {
-  jid: string;
-  expiresAt: number;
-};
-
 const CONTACT_AVATAR_TTL_MS = 1000 * 60 * 15;
-const CONTACT_JID_TTL_MS = 1000 * 60 * 60 * 24;
 const contactAvatarCache = new Map<string, ContactAvatarCacheEntry>();
-const contactJidCache = new Map<string, ContactJidCacheEntry>();
-
-const rememberContactJid = (phone: string, jid: string): void => {
-  if (!phone || !jid || isBroadcastOrGroup(jid)) {
-    return;
-  }
-
-  contactJidCache.set(phone, {
-    jid,
-    expiresAt: Date.now() + CONTACT_JID_TTL_MS,
-  });
-};
-
-const getRememberedContactJid = (phone: string): string | null => {
-  const cached = contactJidCache.get(phone);
-  if (!cached) {
-    return null;
-  }
-
-  if (cached.expiresAt <= Date.now()) {
-    contactJidCache.delete(phone);
-    return null;
-  }
-
-  return cached.jid;
-};
-
-const loadBaileysRuntime = async (): Promise<BaileysRuntime | null> => {
-  if (!BAILEYS_DRIVER_AVAILABLE) {
-    return null;
-  }
-
-  if (!baileysRuntimePromise) {
-    baileysRuntimePromise = (async () => {
-      try {
-        const [baileysImport, qrcodeImport, pinoImport] = await Promise.all([
-          importOptional('@whiskeysockets/baileys'),
-          importOptional('qrcode'),
-          importOptional('pino'),
-        ]);
-
-        const baileysModule = baileysImport as BaileysModule;
-        const qrcodeModule = qrcodeImport as QrCodeModule;
-        const pinoModule = pinoImport as PinoModule;
-        const createLogger = pinoModule.default || pinoModule;
-
-        return {
-          makeWASocket: baileysModule.default,
-          fetchLatestBaileysVersion: baileysModule.fetchLatestBaileysVersion,
-          useMultiFileAuthState: baileysModule.useMultiFileAuthState,
-          toDataURL: qrcodeModule.toDataURL,
-          logger: createLogger({ level: process.env.BAILEYS_LOG_LEVEL || 'silent' }),
-          loggedOutStatusCode: baileysModule.DisconnectReason?.loggedOut || 401,
-        };
-      } catch (error) {
-        console.warn('Driver Baileys indisponivel:', error);
-        return null;
-      }
-    })();
-  }
-
-  return baileysRuntimePromise;
-};
 
 const setState = (patch: Partial<StoredWhatsappState>): void => {
+  const prevState = state.connectionState;
+  const prevQr = state.qrDataUrl;
   Object.assign(state, patch, { lastUpdateAt: new Date().toISOString() });
-  publishWhatsappStateChanged();
-};
-
-const clearReconnectTimer = (): void => {
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-    reconnectTimer = null;
+  if (state.connectionState !== prevState || state.qrDataUrl !== prevQr) {
+    publishWhatsappStateChanged();
   }
 };
 
-const isBroadcastOrGroup = (jid: string): boolean =>
-  jid.endsWith('@g.us') || jid.endsWith('@broadcast') || jid === 'status@broadcast';
-
-const extractTextFromMessage = (message: BaileysMessage): string | null => {
-  const content = message.message;
-  if (!content) {
-    return null;
+const mapEvolutionStatusToInternal = (evo: EvolutionInstanceStatus): Partial<StoredWhatsappState> => {
+  if (!WHATSAPP_FEATURE_ENABLED || !evo.configured) {
+    return {
+      connectionState: 'disabled',
+      qr: null,
+      qrDataUrl: null,
+      lastError: evo.lastError || 'Evolution API nao configurada.',
+    };
   }
 
-  if (typeof content.conversation === 'string' && content.conversation.trim()) {
-    return content.conversation.trim();
+  if (evo.connected || evo.connectionState === 'open') {
+    return {
+      connectionState: 'connected',
+      qr: null,
+      qrDataUrl: null,
+      lastError: null,
+    };
   }
 
-  const extended = content.extendedTextMessage?.text;
-  if (typeof extended === 'string' && extended.trim()) {
-    return extended.trim();
+  if (evo.qrDataUrl) {
+    return {
+      connectionState: 'qr',
+      qr: evo.qrDataUrl,
+      qrDataUrl: evo.qrDataUrl,
+      lastError: evo.lastError || null,
+    };
   }
 
-  const imageCaption = content.imageMessage?.caption;
-  if (typeof imageCaption === 'string' && imageCaption.trim()) {
-    return imageCaption.trim();
+  if (evo.connectionState === 'connecting') {
+    return {
+      connectionState: 'connecting',
+      qr: null,
+      qrDataUrl: null,
+      lastError: evo.lastError || null,
+    };
   }
 
-  const videoCaption = content.videoMessage?.caption;
-  if (typeof videoCaption === 'string' && videoCaption.trim()) {
-    return videoCaption.trim();
-  }
-
-  return null;
+  return {
+    connectionState: 'disconnected',
+    qr: null,
+    qrDataUrl: null,
+    lastError: evo.lastError || null,
+  };
 };
 
-const mapBaileysNumericStatus = (rawStatus: unknown): OutgoingDeliveryStatus | null => {
-  if (typeof rawStatus !== 'number' || !Number.isFinite(rawStatus)) {
-    return null;
+export const syncWhatsappStatusFromEvolution = async (
+  tenantSlug?: string,
+  options: { includeQr?: boolean } = {},
+) => {
+  if (!WHATSAPP_FEATURE_ENABLED) {
+    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
+    return getWhatsappStatus();
   }
 
-  if (rawStatus >= 3) return 'read';
-  if (rawStatus >= 2) return 'delivered';
-  if (rawStatus >= 1) return 'sent';
-  return null;
-};
-
-const mapBaileysReceiptStatus = (rawReceipt: unknown): OutgoingDeliveryStatus | null => {
-  if (typeof rawReceipt !== 'string') {
-    return null;
+  try {
+    const evoStatus = await getEvolutionInstanceStatus(tenantSlug || DEFAULT_TENANT_SLUG, options);
+    setState(mapEvolutionStatusToInternal(evoStatus));
+  } catch (error) {
+    setState({
+      connectionState: 'disconnected',
+      lastError: error instanceof Error ? error.message : 'Erro ao consultar Evolution API.',
+    });
   }
 
-  const receipt = rawReceipt.toLowerCase();
-  if (receipt === 'read' || receipt === 'played') return 'read';
-  if (receipt === 'delivery' || receipt === 'delivered') return 'delivered';
-  if (receipt === 'sender' || receipt === 'server') return 'sent';
-  return null;
+  return getWhatsappStatus();
 };
 
 const applyProviderStatus = (providerMessageId: string | null | undefined, status: OutgoingDeliveryStatus | null): void => {
@@ -288,275 +146,42 @@ const applyProviderStatus = (providerMessageId: string | null | undefined, statu
   }
 };
 
-const handleMessagesStatusUpdate = (updates: unknown): void => {
-  if (!Array.isArray(updates)) {
+export const connectWhatsapp = async (tenantSlug?: string): Promise<void> => {
+  if (!WHATSAPP_FEATURE_ENABLED) {
+    setState({ connectionState: 'disabled', lastError: 'WHATSAPP_FEATURE_ENABLED=false' });
     return;
   }
 
-  updates.forEach((item) => {
-    const typedItem = item as { key?: { id?: string | null }; update?: { status?: unknown } };
-    const providerMessageId = typedItem.key?.id || null;
-    const mappedStatus = mapBaileysNumericStatus(typedItem.update?.status);
-    applyProviderStatus(providerMessageId, mappedStatus);
-  });
+  const targetTenant = tenantSlug || DEFAULT_TENANT_SLUG;
+  const current = await getEvolutionInstanceStatus(targetTenant, { includeQr: true });
+  const finalStatus = current.exists
+    ? current
+    : await createEvolutionInstance(targetTenant);
+
+  setState(mapEvolutionStatusToInternal(finalStatus));
 };
 
-const handleMessageReceiptUpdate = (updates: unknown): void => {
-  if (!Array.isArray(updates)) {
-    return;
-  }
-
-  updates.forEach((item) => {
-    const typedItem = item as { key?: { id?: string | null }; receipt?: unknown };
-    const providerMessageId = typedItem.key?.id || null;
-    const mappedStatus = mapBaileysReceiptStatus(typedItem.receipt);
-    applyProviderStatus(providerMessageId, mappedStatus);
-  });
+export const disconnectWhatsapp = async (tenantSlug?: string): Promise<void> => {
+  const targetTenant = tenantSlug || DEFAULT_TENANT_SLUG;
+  const evoStatus = await logoutEvolutionInstance(targetTenant);
+  setState(mapEvolutionStatusToInternal(evoStatus));
 };
 
-const handleIncomingMessage = async (message: BaileysMessage): Promise<void> => {
-  const remoteJid = message.key.remoteJid || '';
-  if (!remoteJid || message.key.fromMe || isBroadcastOrGroup(remoteJid)) {
-    return;
-  }
-
-  const phone = whatsappJidToPhone(remoteJid);
-  if (!phone) {
-    return;
-  }
-
-  rememberContactJid(phone, remoteJid);
-
-  const text = extractTextFromMessage(message);
-  if (!text) {
-    return;
-  }
-
-  const thread = await inboxStore.ensureThread(phone, message.pushName || null);
-  await inboxStore.addMessage({
-    threadId: thread.id,
-    direction: 'incoming',
-    content: text,
-    providerMessageId: message.key.id || null,
-    isRead: false,
-  });
-
-  // Check if client is requesting a cancellation
-  try {
-    const { handleClientCancellationRequest } = await import('./notificationService');
-    await handleClientCancellationRequest(phone, text);
-  } catch (err) {
-    console.error('Erro ao verificar cancelamento via mensagem:', err);
-  }
+export const reconnectWhatsapp = async (tenantSlug?: string): Promise<void> => {
+  const targetTenant = tenantSlug || DEFAULT_TENANT_SLUG;
+  const evoStatus = await refreshEvolutionInstanceQr(targetTenant);
+  setState(mapEvolutionStatusToInternal(evoStatus));
 };
 
-const handleConnectionUpdate = async (update: Partial<BaileysConnectionState>): Promise<void> => {
-  if (update.qr) {
-    let qrDataUrl: string | null = null;
-    try {
-      const runtime = await loadBaileysRuntime();
-      qrDataUrl = runtime ? await runtime.toDataURL(update.qr) : null;
-    } catch (error) {
-      console.error('Falha ao gerar QR DataURL do Baileys:', error);
-    }
-
-    setState({
-      connectionState: 'qr',
-      qr: update.qr,
-      qrDataUrl,
-      connectedJid: null,
-      lastError: null,
-    });
-  }
-
-  if (update.connection === 'connecting') {
-    setState({ connectionState: 'connecting', lastError: null });
-  }
-
-  if (update.connection === 'open') {
-    setState({
-      connectionState: 'connected',
-      qr: null,
-      qrDataUrl: null,
-      connectedJid: socket?.user?.id || null,
-      lastError: null,
-    });
-  }
-
-  if (update.connection === 'close') {
-    const statusCode =
-      (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode || 0;
-    const runtime = await loadBaileysRuntime();
-    const loggedOut = statusCode === (runtime?.loggedOutStatusCode || 401);
-    const reason = loggedOut
-      ? 'Sessao WhatsApp desconectada (logout). Escaneie o QR novamente.'
-      : `Conexao encerrada (${statusCode || 'sem-codigo'}).`;
-
-    setState({
-      connectionState: BAILEYS_ENABLED ? 'disconnected' : 'disabled',
-      connectedJid: null,
-      qr: null,
-      qrDataUrl: null,
-      lastError: reason,
-    });
-
-    socket = null;
-    connectPromise = null;
-
-    if (!loggedOut && !manualDisconnect && BAILEYS_AUTO_CONNECT) {
-      clearReconnectTimer();
-      reconnectTimer = setTimeout(() => {
-        void connectWhatsapp();
-      }, 2500);
-    }
-  }
-};
-
-const ensureAuthDir = (): void => {
-  if (!fs.existsSync(BAILEYS_AUTH_DIR)) {
-    fs.mkdirSync(BAILEYS_AUTH_DIR, { recursive: true });
-  }
-};
-
-export const connectWhatsapp = async (): Promise<void> => {
-  if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
-    return;
-  }
-
-  manualDisconnect = false;
-
-  if (connectPromise) {
-    return connectPromise;
-  }
-
-  connectPromise = (async () => {
-    try {
-      clearReconnectTimer();
-      ensureAuthDir();
-      setState({ connectionState: 'connecting', lastError: null });
-
-      const runtime = await loadBaileysRuntime();
-      if (!runtime) {
-        setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
-        return;
-      }
-
-      const { state: authState, saveCreds } = await runtime.useMultiFileAuthState(BAILEYS_AUTH_DIR);
-      const { version } = await runtime.fetchLatestBaileysVersion();
-
-      socket = runtime.makeWASocket({
-        version,
-        auth: authState,
-        logger: runtime.logger,
-        printQRInTerminal: false,
-        browser: ['Renovo SaaS', 'Chrome', '1.0.0'],
-      });
-
-      socket.ev.on('creds.update', saveCreds);
-      socket.ev.on('connection.update', (update) => {
-        void handleConnectionUpdate(update as Partial<BaileysConnectionState>);
-      });
-
-      socket.ev.on('messages.upsert', (upsert) => {
-        const payload = upsert as BaileysMessagesUpsert;
-        if (payload.type !== 'notify' || !Array.isArray(payload.messages)) {
-          return;
-        }
-
-        payload.messages.forEach((message) => {
-          void handleIncomingMessage(message).catch((error) => {
-            console.error('Erro ao processar mensagem recebida via Baileys:', error);
-          });
-        });
-      });
-
-      socket.ev.on('messages.update', (updates) => {
-        handleMessagesStatusUpdate(updates);
-      });
-
-      socket.ev.on('message-receipt.update', (updates) => {
-        handleMessageReceiptUpdate(updates);
-      });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      setState({ connectionState: 'disconnected', lastError: message });
-      throw error;
-    } finally {
-      connectPromise = null;
-    }
-  })();
-
-  return connectPromise;
-};
-
-export const disconnectWhatsapp = async (): Promise<void> => {
-  manualDisconnect = true;
-  clearReconnectTimer();
-
-  if (socket) {
-    try {
-      await socket.ws.close();
-    } catch (err) {
-      console.warn('Erro ao fechar websocket WhatsApp:', err);
-    }
-  }
-
-  socket = null;
-  setState({
-    connectionState: BAILEYS_ENABLED ? 'disconnected' : 'disabled',
-    connectedJid: null,
-    qr: null,
-    qrDataUrl: null,
-    lastError: null,
-  });
-};
-
-export const reconnectWhatsapp = async (): Promise<void> => {
-  manualDisconnect = false;
-  await disconnectWhatsapp();
-  manualDisconnect = false;
-  await connectWhatsapp();
-};
-
-export const logoutWhatsapp = async (): Promise<void> => {
-  await disconnectWhatsapp();
-
-  // Remove auth dir to force new QR code on next connect
-  try {
-    if (fs.existsSync(BAILEYS_AUTH_DIR)) {
-      fs.rmSync(BAILEYS_AUTH_DIR, { recursive: true, force: true });
-    }
-  } catch (err) {
-    console.warn('Erro ao remover diretório de autenticação Baileys:', err);
-  }
-
-  manualDisconnect = false;
-  await connectWhatsapp();
+export const logoutWhatsapp = async (tenantSlug?: string): Promise<void> => {
+  const targetTenant = tenantSlug || DEFAULT_TENANT_SLUG;
+  const evoStatus = await logoutEvolutionInstance(targetTenant);
+  setState(mapEvolutionStatusToInternal(evoStatus));
 };
 
 export const initializeWhatsapp = async (): Promise<void> => {
-  if (!BAILEYS_ENABLED) {
-    setState({ connectionState: 'disabled', lastError: BAILEYS_DISABLED_REASON });
-    return;
-  }
-
-  manualDisconnect = false;
-  if (BAILEYS_AUTO_CONNECT) {
-    await connectWhatsapp();
-  }
-};
-
-const ensureSocketConnected = async (): Promise<BaileysSocket> => {
-  if (state.connectionState !== 'connected' || !socket) {
-    await connectWhatsapp();
-  }
-
-  if (state.connectionState !== 'connected' || !socket) {
-    throw new Error('WhatsApp desconectado. Conecte a sessao via QR Code no painel.');
-  }
-
-  return socket;
+  await syncWhatsappStatusFromEvolution(DEFAULT_TENANT_SLUG, { includeQr: false });
+  void configureEvolutionWebhook(DEFAULT_TENANT_SLUG);
 };
 
 export const getWhatsappContactAvatarUrlCached = (phone: string): string | null => {
@@ -567,7 +192,7 @@ export const getWhatsappContactAvatarUrlCached = (phone: string): string | null 
   return null;
 };
 
-export const getWhatsappContactAvatarUrl = async (phone: string): Promise<string | null> => {
+export const getWhatsappContactAvatarUrl = async (phone: string, tenantSlug?: string): Promise<string | null> => {
   const normalizedPhone = normalizeWhatsappPhone(phone);
   if (!normalizedPhone) {
     return null;
@@ -578,204 +203,107 @@ export const getWhatsappContactAvatarUrl = async (phone: string): Promise<string
     return cached.url;
   }
 
-  if (state.connectionState !== 'connected' || !socket) {
-    return cached?.url || null;
-  }
-
-  const candidateJids = new Set<string>();
-  const rememberedJid = getRememberedContactJid(normalizedPhone);
-  if (rememberedJid) {
-    candidateJids.add(rememberedJid);
-  }
-
-  const fallbackJid = `${normalizedPhone}@s.whatsapp.net`;
-  candidateJids.add(fallbackJid);
-
-  if (!normalizedPhone.startsWith('55')) {
-    candidateJids.add(`${normalizedPhone}@lid`);
+  try {
+    const mapped = await whatsappWorkspaceStore.getContactMapByPhone(normalizedPhone);
+    if (mapped?.avatarUrl) {
+      contactAvatarCache.set(normalizedPhone, {
+        url: mapped.avatarUrl,
+        expiresAt: Date.now() + CONTACT_AVATAR_TTL_MS,
+      });
+      return mapped.avatarUrl;
+    }
+  } catch {
+    // fallback to Evolution API
   }
 
   try {
-    const rows = (await socket.onWhatsApp(normalizedPhone).catch(() => [])) as Array<{
-      jid?: string | null;
-      exists?: boolean;
-    }>;
+    const targetTenant = (tenantSlug || DEFAULT_TENANT_SLUG).trim().toLowerCase();
+    const settings = workbenchStore.isEnabled() ? await workbenchStore.getSettings(targetTenant) : {};
+    const resolved = resolveTenantBridgeConfig(targetTenant, settings, 'evolution');
+    if (resolved.ok === true) {
+      const instances = await fetchEvolutionInstances(resolved.config.evolutionUrl, resolved.config.evolutionApiKey);
+      const match = resolveEvolutionInstance(instances, resolved.config.evolutionInstance);
+      const instanceName = match.instanceName || resolved.config.evolutionInstance;
+      const payload = await evolutionApiRequest(
+        resolved.config.evolutionUrl,
+        resolved.config.evolutionApiKey,
+        'POST',
+        `/chat/fetchProfilePictureUrl/${encodeURIComponent(instanceName)}`,
+        { number: normalizedPhone },
+      );
+      const root = asObject(payload);
+      const avatarUrl =
+        getString(root?.profilePictureUrl) ||
+        getString(root?.profilePicUrl) ||
+        getString(root?.picture) ||
+        null;
 
-    rows.forEach((row) => {
-      if (row?.jid) {
-        candidateJids.add(row.jid);
-      }
-    });
-  } catch (err) {
-    console.warn('Erro ao resolver JID para avatar via onWhatsApp:', err);
-  }
-
-  try {
-    for (const jid of candidateJids) {
-      const avatarUrl = await socket.profilePictureUrl(jid, 'image').catch(() => null);
-      if (!avatarUrl) {
-        continue;
-      }
-
-      rememberContactJid(normalizedPhone, jid);
       contactAvatarCache.set(normalizedPhone, {
         url: avatarUrl,
-        expiresAt: Date.now() + CONTACT_AVATAR_TTL_MS,
+        expiresAt: Date.now() + (avatarUrl ? CONTACT_AVATAR_TTL_MS : 1000 * 60 * 3),
       });
       return avatarUrl;
     }
-
-    contactAvatarCache.set(normalizedPhone, {
-      url: null,
-      expiresAt: Date.now() + 1000 * 60 * 3,
-    });
-    return null;
   } catch {
-    contactAvatarCache.set(normalizedPhone, {
-      url: null,
-      expiresAt: Date.now() + 1000 * 60 * 3,
-    });
-    return null;
+    // ignore avatar resolution errors
   }
+
+  contactAvatarCache.set(normalizedPhone, {
+    url: null,
+    expiresAt: Date.now() + 1000 * 60 * 3,
+  });
+  return null;
 };
 
-export const sendWhatsappMessageToCustomer = async (phone: string, text: string): Promise<string | null> => {
-  const normalizedPhone = normalizeWhatsappPhone(phone);
-  if (!normalizedPhone) {
-    throw new Error('Telefone inválido para envio no WhatsApp.');
-  }
-
-  const sock = await ensureSocketConnected();
-  const jid = `${normalizedPhone}@s.whatsapp.net`;
-  rememberContactJid(normalizedPhone, jid);
-  const result = await sock.sendMessage(jid, { text });
-  const providerMessageId = result.key.id || null;
+export const sendWhatsappMessageToCustomer = async (
+  phone: string,
+  text: string,
+  tenantSlug?: string,
+): Promise<string | null> => {
+  const providerMessageId = await sendEvolutionMessageToCustomer(tenantSlug || DEFAULT_TENANT_SLUG, phone, text);
   applyProviderStatus(providerMessageId, 'sent');
   return providerMessageId;
-};
-
-export type WhatsappAttachmentInput = {
-  dataBase64: string;
-  mimeType: string;
-  fileName: string;
-  caption?: string;
-};
-
-const decodeAttachmentBuffer = (rawBase64: string): Buffer => {
-  const normalized = rawBase64.trim();
-  if (!normalized) {
-    throw new Error('Conteudo do anexo vazio.');
-  }
-
-  const commaIndex = normalized.indexOf(',');
-  const base64Payload = commaIndex >= 0 ? normalized.slice(commaIndex + 1) : normalized;
-  return Buffer.from(base64Payload, 'base64');
-};
-
-const resolveSendJid = async (
-  sock: BaileysSocket,
-  normalizedPhone: string,
-): Promise<string> => {
-  const candidateJids = new Set<string>();
-  const remembered = getRememberedContactJid(normalizedPhone);
-  if (remembered) {
-    candidateJids.add(remembered);
-  }
-
-  candidateJids.add(`${normalizedPhone}@s.whatsapp.net`);
-
-  try {
-    const rows = (await sock.onWhatsApp(normalizedPhone).catch(() => [])) as Array<{
-      jid?: string | null;
-      exists?: boolean;
-    }>;
-
-    rows.forEach((row) => {
-      if (row?.jid) {
-        candidateJids.add(row.jid);
-      }
-    });
-  } catch (err) {
-    console.warn('Erro ao resolver JID para envio via onWhatsApp:', err);
-  }
-
-  const preferred = Array.from(candidateJids).find((jid) => !isBroadcastOrGroup(jid));
-  return preferred || `${normalizedPhone}@s.whatsapp.net`;
 };
 
 export const sendWhatsappAttachmentToCustomer = async (
   phone: string,
   attachment: WhatsappAttachmentInput,
+  tenantSlug?: string,
 ): Promise<string | null> => {
-  const normalizedPhone = normalizeWhatsappPhone(phone);
-  if (!normalizedPhone) {
-    throw new Error('Telefone inválido para envio de anexo no WhatsApp.');
-  }
-
-  const sock = await ensureSocketConnected();
-  const jid = await resolveSendJid(sock, normalizedPhone);
-  rememberContactJid(normalizedPhone, jid);
-
-  const mimeType = (attachment.mimeType || '').trim().toLowerCase() || 'application/octet-stream';
-  const fileName = attachment.fileName?.trim() || `anexo-${Date.now()}`;
-  const caption = attachment.caption?.trim() || undefined;
-  const buffer = decodeAttachmentBuffer(attachment.dataBase64);
-
-  if (!buffer.length) {
-    throw new Error('Anexo inválido.');
-  }
-
-  let result: Awaited<ReturnType<typeof sock.sendMessage>>;
-
-  if (mimeType.startsWith('image/')) {
-    result = await sock.sendMessage(jid, { image: buffer, caption });
-  } else if (mimeType.startsWith('video/')) {
-    result = await sock.sendMessage(jid, { video: buffer, caption });
-  } else if (mimeType.startsWith('audio/')) {
-    result = await sock.sendMessage(jid, {
-      audio: buffer,
-      mimetype: mimeType,
-      ptt: true,
-    });
-  } else {
-    result = await sock.sendMessage(jid, {
-      document: buffer,
-      mimetype: mimeType,
-      fileName,
-      caption,
-    });
-  }
-
-  const providerMessageId = result.key.id || null;
+  const providerMessageId = await sendEvolutionAttachmentToCustomer(
+    tenantSlug || DEFAULT_TENANT_SLUG,
+    phone,
+    attachment,
+  );
   applyProviderStatus(providerMessageId, 'sent');
   return providerMessageId;
 };
 
-export const sendWhatsappMessageToSalon = async (text: string): Promise<void> => {
-  if (BAILEYS_SALON_WHATSAPP.length === 0) {
-    throw new Error('Nenhum numero do salao configurado em BAILEYS_SALON_WHATSAPP.');
+export const sendWhatsappMessageToSalon = async (text: string, tenantSlug?: string): Promise<void> => {
+  if (SALON_WHATSAPP_LIST.length === 0) {
+    throw new Error('Nenhum numero do salao configurado.');
   }
 
-  for (const phone of BAILEYS_SALON_WHATSAPP) {
-    await sendWhatsappMessageToCustomer(phone, text);
+  for (const phone of SALON_WHATSAPP_LIST) {
+    await sendWhatsappMessageToCustomer(phone, text, tenantSlug);
   }
 };
 
 export const getWhatsappStatus = () => ({
-  provider: 'baileys' as const,
-  enabled: BAILEYS_ENABLED,
+  provider: 'evolution' as const,
+  enabled: WHATSAPP_FEATURE_ENABLED,
   connectionState: state.connectionState,
   connected: state.connectionState === 'connected',
   connectedJid: state.connectedJid,
   connectedPhone: state.connectedJid ? whatsappJidToPhone(state.connectedJid) : null,
-  qrAvailable: Boolean(state.qr),
+  qrAvailable: Boolean(state.qrDataUrl || state.qr),
   qrDataUrl: state.qrDataUrl,
-  salonNumbersConfigured: BAILEYS_SALON_WHATSAPP.length > 0,
+  salonNumbersConfigured: SALON_WHATSAPP_LIST.length > 0,
   lastError: state.lastError,
   lastUpdateAt: state.lastUpdateAt,
 });
 
 export const whatsappConfig = {
   featureEnabled: WHATSAPP_FEATURE_ENABLED,
-  isConfigured: BAILEYS_ENABLED,
+  isConfigured: WHATSAPP_FEATURE_ENABLED,
 };

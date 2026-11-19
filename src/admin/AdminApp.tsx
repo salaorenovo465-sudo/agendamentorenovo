@@ -7,6 +7,8 @@ import {
   BarChart3,
   Bell,
   Calendar,
+  CalendarClock,
+  CalendarDays,
   CheckCircle2,
   Clock,
   CreditCard,
@@ -14,7 +16,10 @@ import {
   Eye,
   EyeOff,
   FileCheck,
+  History,
   LayoutDashboard,
+  LayoutGrid,
+  ListTodo,
   Loader2,
   Lock,
   LogOut,
@@ -22,10 +27,17 @@ import {
   RefreshCw,
   Settings2,
   ShieldCheck,
+  SlidersHorizontal,
   Sparkles,
+  Star,
   Stethoscope,
+  TrendingUp,
+  UserCheck,
   UserCircle2,
   Users,
+  UsersRound,
+  WalletCards,
+  WandSparkles,
   Wifi,
 } from 'lucide-react';
 
@@ -46,7 +58,9 @@ import {
   getWorkbenchOverviewForAdmin,
   listAdminTenants,
   listAdminBookings,
+  listAdminBookingsBoard,
   listWorkbenchEntityForAdmin,
+  reopenAdminBooking,
   rejectAdminBooking,
   resetAdminBookingsHistory,
   resetAnalyticsHistoryForAdmin,
@@ -61,7 +75,7 @@ import {
 } from './api';
 import { toast, ToastContainer, RejectModal, useKeyboardShortcuts, triggerConfetti, playAdminAlertSound, primeAdminAudio } from './AdminHelpers';
 import PaymentConfirmationTab from './PaymentConfirmationTab';
-import type { AdminBooking, AdminCreateBookingPayload, AdminSettings, AdminTenant, WorkbenchEntity, WorkbenchOverview } from './types';
+import type { AdminBooking, AdminBookingBoardCounts, AdminCreateBookingPayload, AdminSettings, AdminTenant, AdminUnifiedHistoryStatus, WorkbenchEntity, WorkbenchOverview } from './types';
 import { services as publicServicesOriginal } from '../data/services';
 
 import {
@@ -77,9 +91,11 @@ import {
   INITIAL_ENTITY_ROWS,
 } from './AdminUtils';
 import { CrudTab } from './CrudTab';
+import { MoneyEyeButton, MoneyPrivacyProvider } from './MoneyPrivacyContext';
 
 import { DashboardTab } from './tabs/DashboardTab';
 import { AgendaTab } from './tabs/AgendaTab';
+import { HistoricoTab } from './tabs/HistoricoTab';
 import { ServicosTab } from './tabs/ServicosTab';
 import { TarefasTab } from './tabs/TarefasTab';
 import { ProfissionaisTab } from './tabs/ProfissionaisTab';
@@ -243,6 +259,7 @@ export default function AdminApp() {
   const [dateFilterEnd, setDateFilterEnd] = useState(getTodayDate());
   const [dateScope, setDateScope] = useState<'all' | 'range'>('all');
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
+  const [boardCounts, setBoardCounts] = useState<AdminBookingBoardCounts | null>(null);
   const [allBookings, setAllBookings] = useState<AdminBooking[]>([]);
   const [bookingsLoading, setBookingsLoading] = useState(false);
   const [busyBookingId, setBusyBookingId] = useState<number | null>(null);
@@ -251,6 +268,9 @@ export default function AdminApp() {
 
   const [overview, setOverview] = useState<WorkbenchOverview>(defaultOverview);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  const [overviewHasLoadedOnce, setOverviewHasLoadedOnce] = useState(false);
+  const [overviewError, setOverviewError] = useState('');
+  const overviewAbortRef = useRef<AbortController | null>(null);
 
   const [entityRows, setEntityRows] = useState<Record<WorkbenchEntity, Record<string, unknown>[]>>(INITIAL_ENTITY_ROWS);
   const [entityLoading, setEntityLoading] = useState<Record<WorkbenchEntity, boolean>>({
@@ -266,6 +286,7 @@ export default function AdminApp() {
   });
 
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [historicoInitialStatus, setHistoricoInitialStatus] = useState<AdminUnifiedHistoryStatus>('all');
   const [showNewTask, setShowNewTask] = useState(false);
   const [showNewProf, setShowNewProf] = useState(false);
   const [selectedProf, setSelectedProf] = useState<Record<string, unknown> | null>(null);
@@ -287,17 +308,18 @@ export default function AdminApp() {
 
   const navItems = useMemo(
     () => [
-      { id: 'dashboard' as TabId, label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'agenda' as TabId, label: 'Agenda', icon: Calendar },
-      { id: 'clientes' as TabId, label: 'Clientes', icon: Users },
-      { id: 'servicos' as TabId, label: 'Servicos', icon: Sparkles },
-      { id: 'profissionais' as TabId, label: 'Colaboradores', icon: UserCircle2 },
-      { id: 'tarefas' as TabId, label: 'Tarefas', icon: Bell },
-      { id: 'disponibilidade' as TabId, label: 'Disponibilidade', icon: Clock },
-      { id: 'analytics' as TabId, label: 'Analytics', icon: BarChart3 },
-      { id: 'pagamentos' as TabId, label: 'Pagamentos', icon: CreditCard },
-      { id: 'avaliacoes' as TabId, label: 'Avaliacoes', icon: FileCheck },
-      { id: 'configuracoes' as TabId, label: 'Configuracoes', icon: Settings2 },
+      { id: 'dashboard' as TabId, label: 'Dashboard', icon: LayoutGrid },
+      { id: 'agenda' as TabId, label: 'Agenda', icon: CalendarDays },
+      { id: 'historico' as TabId, label: 'Histórico', icon: History },
+      { id: 'clientes' as TabId, label: 'Clientes', icon: UsersRound },
+      { id: 'servicos' as TabId, label: 'Servicos', icon: WandSparkles },
+      { id: 'profissionais' as TabId, label: 'Colaboradores', icon: UserCheck },
+      { id: 'tarefas' as TabId, label: 'Tarefas', icon: ListTodo },
+      { id: 'disponibilidade' as TabId, label: 'Disponibilidade', icon: CalendarClock },
+      { id: 'analytics' as TabId, label: 'Analytics', icon: TrendingUp },
+      { id: 'pagamentos' as TabId, label: 'Pagamentos', icon: WalletCards },
+      { id: 'avaliacoes' as TabId, label: 'Avaliacoes', icon: Star },
+      { id: 'configuracoes' as TabId, label: 'Configuracoes', icon: SlidersHorizontal },
     ],
     [],
   );
@@ -378,17 +400,18 @@ export default function AdminApp() {
     setBookingsLoading(true);
     setError('');
     try {
-      const rows = await listAdminBookings(
+      const board = await listAdminBookingsBoard(
         adminKey,
         dateScope === 'all'
-          ? { scope: 'all' }
-          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd },
+          ? { scope: 'all', completedLimit: 20 }
+          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd, completedLimit: 20 },
         activeTenant,
       );
-      setBookings(rows);
+      setBookings(board.bookings);
+      setBoardCounts(board.counts);
       setRescheduleMap((current) => {
         const next = { ...current };
-        rows.forEach((row) => {
+        board.bookings.forEach((row) => {
           if (!next[row.id]) {
             next[row.id] = { date: row.date, time: row.time };
           }
@@ -398,6 +421,7 @@ export default function AdminApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar agenda.');
       setBookings([]);
+      setBoardCounts(null);
     } finally {
       setBookingsLoading(false);
     }
@@ -406,7 +430,7 @@ export default function AdminApp() {
   const loadAllBookings = async () => {
     if (!adminKey) return;
     try {
-      const rows = await listAdminBookings(adminKey, { scope: 'all' }, activeTenant);
+      const rows = await listAdminBookings(adminKey, { scope: 'all', mode: 'full' }, activeTenant);
       setAllBookings(rows);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao carregar historico global de agendamentos.');
@@ -416,20 +440,37 @@ export default function AdminApp() {
 
   const loadOverview = async () => {
     if (!adminKey) return;
+    overviewAbortRef.current?.abort();
+    const controller = new AbortController();
+    overviewAbortRef.current = controller;
+
     setOverviewLoading(true);
+    setOverviewError('');
     try {
       const data = await getWorkbenchOverviewForAdmin(
         adminKey,
         dateScope === 'all'
-          ? { scope: 'all' }
-          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd },
+          ? { scope: 'all', signal: controller.signal }
+          : { scope: 'range', startDate: dateFilter, endDate: dateFilterEnd, signal: controller.signal },
+        activeTenant,
       );
+      if (controller.signal.aborted) return;
       setOverview(data);
+      setOverviewHasLoadedOnce(true);
+      setOverviewError('');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Erro ao carregar dashboard.');
-      setOverview(defaultOverview);
+      if (controller.signal.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        return;
+      }
+      const message = err instanceof Error ? err.message : 'Erro ao carregar dashboard.';
+      setOverviewError(message);
+      if (activeTab !== 'dashboard') {
+        setError(message);
+      }
     } finally {
-      setOverviewLoading(false);
+      if (!controller.signal.aborted) {
+        setOverviewLoading(false);
+      }
     }
   };
 
@@ -487,9 +528,11 @@ export default function AdminApp() {
 
   const refreshAll = useCallback(() => {
     void loadBookings();
-    void loadAllBookings();
+    if (activeTab === 'analytics') {
+      void loadAllBookings();
+    }
     void loadOverview();
-  }, [adminKey, activeTenant, dateFilter, dateFilterEnd, dateScope]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [adminKey, activeTenant, activeTab, dateFilter, dateFilterEnd, dateScope]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useKeyboardShortcuts(useMemo(() => ({
     refresh: refreshAll,
@@ -602,11 +645,14 @@ export default function AdminApp() {
   useEffect(() => {
     if (!adminKey) return;
     void loadTenants();
-    void loadAllBookings();
-    void loadEntity('clients');
     void loadEntity('professionals');
     void loadEntity('services');
   }, [adminKey]);
+
+  useEffect(() => {
+    if (!adminKey || activeTab !== 'analytics') return;
+    void loadAllBookings();
+  }, [adminKey, activeTab, activeTenant]);
 
   useEffect(() => {
     const serviceCatalogManaged = settings.serviceCatalogManaged === true || entityRows.services.length > 0;
@@ -618,10 +664,16 @@ export default function AdminApp() {
   }, [entityRows.services, settings.serviceCatalogManaged]);
 
   useEffect(() => {
+    setOverviewHasLoadedOnce(false);
+    setOverviewError('');
+    setOverview(defaultOverview);
+  }, [activeTenant, adminKey]);
+
+  useEffect(() => {
     if (!adminKey) return;
     void loadBookings();
     void loadOverview();
-  }, [adminKey, dateFilter, dateFilterEnd, dateScope]);
+  }, [adminKey, activeTenant, dateFilter, dateFilterEnd, dateScope]);
 
   useEffect(() => {
     if (!adminKey) return;
@@ -777,6 +829,10 @@ export default function AdminApp() {
   };
 
   const handleOpenTab = (tabId: TabId) => {
+    setError('');
+    if (tabId === 'historico') {
+      setHistoricoInitialStatus('all');
+    }
     if (tabId === activeTab) {
       setSidebarOpen(false);
       return;
@@ -854,7 +910,9 @@ export default function AdminApp() {
   const withAgendaRefresh = async (callback: () => Promise<void>) => {
     await callback();
     await loadBookings();
-    await loadAllBookings();
+    if (activeTab === 'analytics') {
+      await loadAllBookings();
+    }
     await loadOverview();
   };
 
@@ -888,6 +946,23 @@ export default function AdminApp() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Erro ao finalizar agendamento.');
       toast.error('Erro ao finalizar.');
+    } finally {
+      setBusyBookingId(null);
+    }
+  };
+
+  const handleReopenBooking = async (booking: AdminBooking) => {
+    if (!adminKey) return;
+    setBusyBookingId(booking.id);
+    setError('');
+    try {
+      await withAgendaRefresh(async () => {
+        await reopenAdminBooking(booking.id, adminKey, activeTenant);
+      });
+      toast.success('Agendamento reaberto!');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erro ao reabrir agendamento.');
+      toast.error('Erro ao reabrir.');
     } finally {
       setBusyBookingId(null);
     }
@@ -982,7 +1057,9 @@ export default function AdminApp() {
         triggerConfetti();
       }
 
-      await loadAllBookings();
+      if (activeTab === 'analytics') {
+        await loadAllBookings();
+      }
 
       if (dateScope !== 'all' && (payload.date < dateFilter || payload.date > dateFilterEnd)) {
         setDateFilter(payload.date);
@@ -1409,20 +1486,21 @@ export default function AdminApp() {
   }
 
   return (
-    <div className="admin-layout">
+    <MoneyPrivacyProvider>
+      <div className="admin-layout">
       <div className={`admin-sidebar-overlay${sidebarOpen ? ' admin-sidebar-overlay-visible' : ''}`} onClick={() => setSidebarOpen(false)} />
-      <aside className={`admin-sidebar${sidebarOpen ? ' admin-sidebar-open' : ''}`} style={{ width: 260 }}>
+      <aside className={`admin-sidebar${sidebarOpen ? ' admin-sidebar-open' : ''}`}>
         <div className="admin-sidebar-brand">
           <div className="admin-brand-icon">
-            <Stethoscope style={{ width: 22, height: 22, color: 'var(--admin-gold, #d4af37)' }} />
+            <Sparkles strokeWidth={2} style={{ width: 19, height: 19, color: '#ffffff' }} />
           </div>
           <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 15, fontWeight: 800, color: 'var(--admin-gold, #d4af37)', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', letterSpacing: '0.04em' }}>Estúdio Renovo</p>
-            <p style={{ fontSize: 10, color: 'rgba(212,175,55,0.5)', margin: 0, fontWeight: 500, letterSpacing: '0.1em', textTransform: 'uppercase' }}>Premium Beauty</p>
+            <p className="admin-brand-title">Estúdio Renovo</p>
+            <p className="admin-brand-subtitle">Painel Gestor</p>
           </div>
         </div>
 
-        <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }} className="admin-scroll">
+        <nav className="admin-sidebar-nav admin-scroll">
           {navItems.map((item) => {
             const Icon = item.icon;
             const active = activeTab === item.id;
@@ -1432,132 +1510,178 @@ export default function AdminApp() {
                 onClick={() => { handleOpenTab(item.id); }}
                 className={`admin-nav-item${active ? ' active' : ''}`}
               >
-                <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
-                <span style={{ fontSize: 14.5, fontWeight: active ? 700 : 500, letterSpacing: '0.01em', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                  {item.label}
-                  {protectedTabs[item.id] && !unlockedProtectedTabs[item.id] && <Lock style={{ width: 13, height: 13 }} />}
+                <span className="admin-nav-icon">
+                  <Icon strokeWidth={active ? 2.15 : 1.75} style={{ width: 19, height: 19, flexShrink: 0 }} />
                 </span>
+                <span className="admin-nav-label">
+                  {item.label}
+                </span>
+                {protectedTabs[item.id] && !unlockedProtectedTabs[item.id] && (
+                  <span className="admin-nav-lock" title="Aba protegida">
+                    <Lock strokeWidth={1.9} style={{ width: 12, height: 12 }} />
+                  </span>
+                )}
               </button>
             );
           })}
         </nav>
 
-        <div style={{ padding: '12px 10px', borderTop: '1px solid var(--admin-border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <button
-            onClick={() => {
-              void loadBookings();
-              void loadOverview();
-              const entity = ENTITY_BY_TAB[activeTab];
-              if (entity && entity !== 'clients') {
-                void loadEntity(entity);
-              }
-            }}
-            className="admin-btn-outline"
-            style={{ width: '100%', padding: '9px 14px', justifyContent: 'center' }}
-          >
-            <RefreshCw style={{ width: 14, height: 14 }} /> Atualizar
-          </button>
-          <button onClick={handleLogout} className="admin-btn-danger" style={{ width: '100%', padding: '9px 14px', justifyContent: 'center' }}>
-            <LogOut style={{ width: 14, height: 14 }} /> Sair
-          </button>
+        <div className="admin-sidebar-footer">
+          <div className="admin-sidebar-status-head">
+            <strong>Status</strong>
+            <span>{overviewLoading ? 'Sincronizando...' : 'Online'}</span>
+          </div>
+          <div className="admin-sidebar-progress">
+            <span style={{ width: overviewLoading ? '68%' : '100%' }} />
+          </div>
+          <p className="admin-sidebar-status-caption">
+            {overviewLoading ? 'Atualizando dados...' : '100% sincronizado'}
+          </p>
+          <MoneyEyeButton variant="sidebar" />
+          <div className="admin-sidebar-actions">
+            <button
+              onClick={() => {
+                void loadBookings();
+                void loadOverview();
+                const entity = ENTITY_BY_TAB[activeTab];
+                if (entity && entity !== 'clients') {
+                  void loadEntity(entity);
+                }
+              }}
+              className="admin-sidebar-btn"
+            >
+              <RefreshCw strokeWidth={1.9} style={{ width: 13.5, height: 13.5 }} /> Atualizar
+            </button>
+            <button onClick={handleLogout} className="admin-sidebar-btn admin-sidebar-btn-danger">
+              <LogOut strokeWidth={1.9} style={{ width: 13.5, height: 13.5 }} /> Sair
+            </button>
+          </div>
         </div>
       </aside>
 
       <div className="admin-main">
-        <div className="admin-topbar">
+        <div className="admin-topbar admin-mobile-topbar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button className="admin-hamburger" onClick={() => setSidebarOpen(true)}>
-              <Menu style={{ width: 24, height: 24 }} />
+            <button className="admin-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Abrir menu">
+              <Menu style={{ width: 22, height: 22 }} />
             </button>
             <div>
-            <h1 style={{ fontSize: 19, fontWeight: 700, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>{navItems.find((item) => item.id === activeTab)?.label}</h1>
-            <p style={{ fontSize: 12, color: 'var(--admin-text-muted)', margin: '2px 0 0' }}>Estúdio Renovo — Gestão Premium</p>
-          </div>
+              <h1 style={{ fontSize: 16, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '-0.01em' }}>
+                {navItems.find((item) => item.id === activeTab)?.label}
+              </h1>
+            </div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <select
-              value={activeTenant}
-              onChange={(event) => setActiveTenant(event.target.value)}
-              className="admin-input-sm"
-            >
-              {tenants.map((tenant) => (
-                <option key={tenant.slug} value={tenant.slug}>
-                  {tenant.name}
-                </option>
-              ))}
-              {tenants.length === 0 && <option value={activeTenant}>{activeTenant}</option>}
-            </select>
-            {(activeTab === 'dashboard' || activeTab === 'agenda' || activeTab === 'analytics') && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: 4, borderRadius: 999, background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)' }}>
-                  <button
-                    type="button"
-                    onClick={() => setDateScope('all')}
-                    className={dateScope === 'all' ? 'admin-btn-primary' : 'admin-btn-outline'}
-                    style={{ padding: '6px 12px', fontSize: 11 }}
-                  >
-                    Geral
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setDateScope('range')}
-                    className={dateScope === 'range' ? 'admin-btn-primary' : 'admin-btn-outline'}
-                    style={{ padding: '6px 12px', fontSize: 11 }}
-                  >
-                    Periodo
-                  </button>
-                </div>
-                {dateScope === 'range' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>De</span>
-                    <input type="date" value={dateFilter} onChange={(e) => { setDateFilter(e.target.value); if (e.target.value > dateFilterEnd) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
-                    <span style={{ fontSize: 11, color: 'var(--admin-text-muted)', fontWeight: 600 }}>Ate</span>
-                    <input type="date" value={dateFilterEnd} onChange={(e) => { if (e.target.value >= dateFilter) setDateFilterEnd(e.target.value); }} className="admin-input-sm" />
-                  </div>
-                )}
-              </div>
+            <MoneyEyeButton variant="icon" showLabel={false} />
+            {tenants.length > 1 && (
+              <select
+                value={activeTenant}
+                onChange={(event) => setActiveTenant(event.target.value)}
+                className="admin-input-sm"
+              >
+                {tenants.map((tenant) => (
+                  <option key={tenant.slug} value={tenant.slug}>
+                    {tenant.name}
+                  </option>
+                ))}
+              </select>
             )}
           </div>
         </div>
 
-        <div className="admin-content">
-          {error && <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 'var(--admin-radius-sm)', background: 'rgba(251,113,133,0.08)', border: '1px solid rgba(251,113,133,0.2)', color: '#fb7185', fontSize: 13, fontWeight: 500 }}>{error}</div>}
+        <div className={`admin-content${activeTab === 'agenda' ? ' admin-content-agenda' : ''}`}>
+          {error && (
+            <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 'var(--admin-radius-sm)', background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span>{error}</span>
+              <button type="button" onClick={() => setError('')} style={{ border: 'none', background: 'transparent', color: '#b91c1c', cursor: 'pointer', fontWeight: 800, fontSize: 15, lineHeight: 1 }} aria-label="Fechar alerta">×</button>
+            </div>
+          )}
 
           {activeTab === 'dashboard' && (
             <DashboardTab
+              adminKey={adminKey}
+              tenantSlug={activeTenant}
+              tenantName={activeTenantName}
               overview={overview}
-              bookings={bookings}
-              bookingsLoading={bookingsLoading}
               overviewLoading={overviewLoading}
+              overviewHasLoadedOnce={overviewHasLoadedOnce}
+              overviewError={overviewError}
               dateFilter={dateFilter}
+              dateFilterEnd={dateFilterEnd}
               dateScope={dateScope}
-              dateLabel={dateFilterLabel}
               stageSummary={stageSummary}
+              onApplyDatePeriod={(next) => {
+                setDateScope(next.scope);
+                setDateFilter(next.startDate);
+                setDateFilterEnd(next.endDate);
+              }}
+              onReloadOverview={() => void loadOverview()}
+              onOpenAgendaForDate={(targetDate) => {
+                setDateScope('range');
+                setDateFilter(targetDate);
+                setDateFilterEnd(targetDate);
+                handleOpenTab('agenda');
+              }}
+              onNavigateTab={handleOpenTab}
               onResetFinance={handleResetFinance}
             />
           )}
 
           {activeTab === 'agenda' && (
             <AgendaTab
+              adminKey={adminKey}
+              tenantSlug={activeTenant}
               bookings={bookings}
+              boardCounts={boardCounts}
               bookingsLoading={bookingsLoading}
               dateScope={dateScope}
+              onDateScopeChange={setDateScope}
+              dateFilter={dateFilter}
+              onDateFilterChange={(value) => {
+                setDateFilter(value);
+                if (value > dateFilterEnd) setDateFilterEnd(value);
+              }}
+              dateFilterEnd={dateFilterEnd}
+              onDateFilterEndChange={(value) => {
+                if (value >= dateFilter) setDateFilterEnd(value);
+              }}
               dateLabel={dateFilterLabel}
               busyBookingId={busyBookingId}
               rescheduleMap={rescheduleMap}
               setRescheduleMap={setRescheduleMap}
               onConfirm={handleConfirmBooking}
               onComplete={handleCompleteBooking}
+              onReopen={handleReopenBooking}
               onReject={handleRejectBooking}
               onDelete={handleDeleteBooking}
               onReschedule={handleRescheduleBooking}
               onCreateBooking={handleCreateAgendaBooking}
               onAssignProfessional={handleAssignBookingProfessional}
               onClearHistory={handleResetAgendaHistory}
+              onOpenFullHistory={() => {
+                setHistoricoInitialStatus('completed');
+                setActiveTab('historico');
+              }}
               serviceCatalog={localServices}
               clients={entityRows.clients}
               professionals={entityRows.professionals}
               defaultCreateDate={defaultAgendaDate}
+            />
+          )}
+
+          {activeTab === 'historico' && (
+            <HistoricoTab
+              adminKey={adminKey}
+              tenantSlug={activeTenant}
+              initialStatusFilter={historicoInitialStatus}
+              busyBookingId={busyBookingId}
+              onConfirm={handleConfirmBooking}
+              onComplete={handleCompleteBooking}
+              onReopen={handleReopenBooking}
+              onReject={handleRejectBooking}
+              onDelete={handleDeleteBooking}
+              professionals={entityRows.professionals}
+              serviceCatalog={localServices}
             />
           )}
 
@@ -1650,6 +1774,17 @@ export default function AdminApp() {
               serviceCatalog={localServices}
               analyticsSubTab={analyticsSubTab}
               setAnalyticsSubTab={setAnalyticsSubTab}
+              dateScope={dateScope}
+              onDateScopeChange={setDateScope}
+              dateFilter={dateFilter}
+              onDateFilterChange={(value) => {
+                setDateFilter(value);
+                if (value > dateFilterEnd) setDateFilterEnd(value);
+              }}
+              dateFilterEnd={dateFilterEnd}
+              onDateFilterEndChange={(value) => {
+                if (value >= dateFilter) setDateFilterEnd(value);
+              }}
               dateLabel={dateFilterLabel}
               onClearHistory={handleResetAnalyticsHistory}
             />
@@ -1688,7 +1823,7 @@ export default function AdminApp() {
           <div className="admin-modal-card admin-modal-card-sm admin-lock-modal" role="dialog" aria-modal="true">
             <div className="admin-modal-header admin-modal-header-compact">
               <div className="admin-modal-icon admin-modal-icon-gold">
-                <Lock style={{ width: 17, height: 17, color: 'var(--admin-gold, #d4af37)' }} />
+                <Lock style={{ width: 17, height: 17, color: 'var(--admin-accent, #3a0a1e)' }} />
               </div>
               <div>
                 <h3 className="admin-modal-title">{protectedTabLabel} protegido</h3>
@@ -1729,6 +1864,7 @@ export default function AdminApp() {
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </MoneyPrivacyProvider>
   );
 }

@@ -133,9 +133,12 @@ const parseIcsDateValue = (value: string, tzid?: string): Date | null => {
 
   const [, year, month, day, hour, minute, second = '00'] = localMatch;
   const normalizedTzid = tzid?.trim().replace(/"/g, '');
-  const isKnownTimezone = !normalizedTzid || normalizedTzid.includes('America/');
+  const isBrazilStandardTimezone =
+    !normalizedTzid ||
+    normalizedTzid === CALENDAR_TIMEZONE ||
+    /^America\/(Sao_Paulo|Bahia|Fortaleza|Recife|Maceio|Belem|Araguaina)$/i.test(normalizedTzid);
 
-  if (isKnownTimezone) {
+  if (isBrazilStandardTimezone) {
     return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour) - TZ_OFFSET_HOURS, Number(minute), Number(second)));
   }
 
@@ -179,19 +182,52 @@ const buildBookingDateTime = (date: string, time: string): Date => {
   return new Date(`${date}T${normalizedTime}${tzOffsetStr}`);
 };
 
+const ICS_CACHE_TTL_MS = 60_000;
+let cachedIcsEvents: { blocks: string[]; expiresAt: number } | null = null;
+let inflightIcsPromise: Promise<string[]> | null = null;
+
+const getIcsEventBlocksCached = async (): Promise<string[]> => {
+  if (!GOOGLE_CALENDAR_ICS_URL) {
+    return [];
+  }
+
+  if (cachedIcsEvents && cachedIcsEvents.expiresAt > Date.now()) {
+    return cachedIcsEvents.blocks;
+  }
+
+  if (inflightIcsPromise) {
+    return inflightIcsPromise;
+  }
+
+  inflightIcsPromise = (async () => {
+    try {
+      const response = await fetch(GOOGLE_CALENDAR_ICS_URL);
+      if (!response.ok) {
+        throw new Error(`ICS indisponível: ${response.status}`);
+      }
+
+      const rawIcs = await response.text();
+      const unfoldedIcs = unfoldIcsText(rawIcs);
+      const blocks = unfoldedIcs.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+      cachedIcsEvents = {
+        blocks,
+        expiresAt: Date.now() + ICS_CACHE_TTL_MS,
+      };
+      return blocks;
+    } finally {
+      inflightIcsPromise = null;
+    }
+  })();
+
+  return inflightIcsPromise;
+};
+
 export const fetchBusySlotsFromIcs = async (date: string): Promise<string[]> => {
   if (!GOOGLE_CALENDAR_ICS_URL) {
     return [];
   }
 
-  const response = await fetch(GOOGLE_CALENDAR_ICS_URL);
-  if (!response.ok) {
-    throw new Error(`ICS indisponível: ${response.status}`);
-  }
-
-  const rawIcs = await response.text();
-  const unfoldedIcs = unfoldIcsText(rawIcs);
-  const eventBlocks = unfoldedIcs.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT/g) || [];
+  const eventBlocks = await getIcsEventBlocksCached();
   const dayStart = buildDayBoundary(date, false);
   const dayEnd = buildDayBoundary(date, true);
   const busySlots = new Set<string>();

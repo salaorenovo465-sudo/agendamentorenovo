@@ -1,8 +1,8 @@
 import { workbenchStore } from '../db/workbenchStore';
 import { sendEvolutionMessageToCustomer } from './evolutionIntegrationService';
 
-const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
-const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
+export const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
+export const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
 const CLIENT_AGENT_MAX_EVENTS = 600;
 const LOCAL_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const LOCAL_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
@@ -172,7 +172,7 @@ const buildTaskNotes = (rule: ClientAgentRule, preview: string): string =>
 
 const buildCycleEventId = (): string => `event_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
+export const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -253,7 +253,7 @@ const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
   return sanitized;
 };
 
-const sanitizeClientAgentEvents = (value: unknown): ClientAgentEvent[] => {
+export const sanitizeClientAgentEvents = (value: unknown): ClientAgentEvent[] => {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -627,10 +627,14 @@ export const startClientAgentScheduler = (): void => {
 
   schedulerStarted = true;
   schedulerHandle = setInterval(() => {
-    void processDueRules();
+    void processDueRules().catch((err) => {
+      console.warn('[Scheduler Safe Guard] Falha transitória no ciclo do agente AI:', err?.message || err);
+    });
   }, 60_000);
 
-  void processDueRules();
+  void processDueRules().catch((err) => {
+    console.warn('[Scheduler Safe Guard] Falha transitória no ciclo inicial do agente AI:', err?.message || err);
+  });
 };
 
 export const stopClientAgentScheduler = (): void => {

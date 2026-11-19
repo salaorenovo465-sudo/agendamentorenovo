@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { normalizeWhatsappPhone, normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 import { type GenericObject, asObject, asArray, getString, getPositiveInt } from '../utils/helpers';
 import { fetchEvolutionInstances, resolveEvolutionInstance } from './evolutionApiService';
@@ -174,18 +175,31 @@ export const validateWebhookSecret = (
   expectedSecret: string | null,
   receivedSecret: string | null,
 ): { ok: true } | { ok: false; error: string } => {
-  if (!expectedSecret) {
-    return { ok: true };
+  if (!expectedSecret || !expectedSecret.trim()) {
+    return {
+      ok: false,
+      error: 'Webhook rejeitado: segredo de webhook não configurado para este tenant.',
+    };
   }
 
-  if (receivedSecret && receivedSecret === expectedSecret) {
-    return { ok: true };
+  if (!receivedSecret || !receivedSecret.trim()) {
+    return {
+      ok: false,
+      error: 'Webhook não autorizado: cabeçalho ou token de segredo ausente.',
+    };
   }
 
-  return {
-    ok: false,
-    error: 'Webhook não autorizado para este tenant.',
-  };
+  const expected = Buffer.from(expectedSecret.trim());
+  const received = Buffer.from(receivedSecret.trim());
+
+  if (expected.length !== received.length || !crypto.timingSafeEqual(expected, received)) {
+    return {
+      ok: false,
+      error: 'Webhook não autorizado: segredo inválido para este tenant.',
+    };
+  }
+
+  return { ok: true };
 };
 
 const extractMessageText = (payload: GenericObject | null): string => {

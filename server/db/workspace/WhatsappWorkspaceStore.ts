@@ -447,6 +447,28 @@ class WhatsappWorkspaceStore {
     return mapSqliteContactMap(row);
   }
 
+  async getContactMapByPhone(phone: string): Promise<WhatsappContactMap | null> {
+    const normalizedPhone = phone.trim();
+    if (!normalizedPhone) return null;
+
+    if (this.supabaseEnabled && this.supabase) {
+      const { data, error } = await this.supabase
+        .from('whatsapp_contact_map')
+        .select('*')
+        .eq('phone', normalizedPhone)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data ? mapSupabaseContactMap(data as Record<string, unknown>) : null;
+    }
+
+    const row = this.sqlite
+      .prepare('SELECT * FROM whatsapp_contact_map WHERE phone = ? LIMIT 1')
+      .get(normalizedPhone) as Record<string, unknown> | undefined;
+
+    return row ? mapSqliteContactMap(row) : null;
+  }
+
   async upsertConversationMap(input: {
     threadId: number;
     waJid?: string | null;

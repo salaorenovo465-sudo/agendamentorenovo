@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { bookingStore } from '../db/bookingStore';
 import { inboxStore } from '../db/inboxStore';
 import { workbenchStore } from '../db/workbenchStore';
+import { createRateLimit } from '../middleware/rateLimit';
 import type { BookingServiceItem } from '../types';
 import {
   calendarConfig,
@@ -73,12 +74,46 @@ const buildMinuteSlots = (startMinute: number, endMinute: number): Set<string> =
   return slots;
 };
 
-const isPastLocalDate = (date: string): boolean => {
-  const dateObj = new Date(`${date}T12:00:00`);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  dateObj.setHours(0, 0, 0, 0);
-  return dateObj < today;
+const getCurrentTimezoneDateTime = (timeZone = calendarConfig.timezone): { date: string; time: string } => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date());
+
+  const getPart = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((part) => part.type === type)?.value || '';
+
+  const rawHour = getPart('hour');
+  const hour = rawHour === '24' ? '00' : rawHour;
+
+  return {
+    date: `${getPart('year')}-${getPart('month')}-${getPart('day')}`,
+    time: `${hour}:${getPart('minute')}`,
+  };
+};
+
+const filterFutureSlotsIfToday = (slots: Set<string>, date: string, nowTz: { date: string; time: string }): Set<string> => {
+  if (date !== nowTz.date) {
+    return slots;
+  }
+
+  return new Set(Array.from(slots).filter((slot) => slot > nowTz.time));
+};
+
+const isBookingConflictError = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') {
+    return error instanceof Error && /horario ja reservado/i.test(error.message);
+  }
+  const err = error as { code?: string; message?: string };
+  if (err.code === '23505' || err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+    return true;
+  }
+  return typeof err.message === 'string' && (/horario ja reservado|bookings_unique_active_slot_idx/i.test(err.message));
 };
 
 const parseBookingServiceItems = (value: unknown): BookingServiceItem[] => {
@@ -117,10 +152,10 @@ const getAvailabilityConstraints = async (date: string): Promise<{
   limitPerDay: number | null;
   hasConfiguredRules: boolean;
 }> => {
-  const dateObj = new Date(date + 'T12:00:00');
-  const weekday = dateObj.getDay(); // 0=Sunday, 6=Saturday
+  const nowTz = getCurrentTimezoneDateTime();
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay(); // 0=Sunday, 6=Saturday
 
-  if (isPastLocalDate(date) || weekday === 0) {
+  if (date < nowTz.date || weekday === 0) {
     return {
       allowedSlots: new Set<string>(),
       limitPerDay: null,
@@ -136,7 +171,9 @@ const getAvailabilityConstraints = async (date: string): Promise<{
 
   if (rules.length === 0) {
     return {
-      allowedSlots: hasConfiguredRules ? new Set<string>() : buildMinuteSlots(DEFAULT_OPEN_START_MINUTE, DEFAULT_OPEN_END_MINUTE),
+      allowedSlots: hasConfiguredRules
+        ? new Set<string>()
+        : filterFutureSlotsIfToday(buildMinuteSlots(DEFAULT_OPEN_START_MINUTE, DEFAULT_OPEN_END_MINUTE), date, nowTz),
       limitPerDay: null,
       hasConfiguredRules,
     };
@@ -164,7 +201,7 @@ const getAvailabilityConstraints = async (date: string): Promise<{
   }
 
   return {
-    allowedSlots,
+    allowedSlots: filterFutureSlotsIfToday(allowedSlots, date, nowTz),
     limitPerDay,
     hasConfiguredRules,
   };
@@ -240,6 +277,13 @@ publicRoutes.get('/services', async (_req, res) => {
   }
 });
 
+const maskEmail = (email: string | null | undefined): string | null => {
+  if (!email || typeof email !== 'string' || !email.includes('@')) return null;
+  const [user, domain] = email.split('@');
+  if (user.length <= 2) return `*@${domain}`;
+  return `${user.slice(0, 2)}***${user.slice(-1)}@${domain}`;
+};
+
 publicRoutes.get('/integration-status', async (req, res) => {
   const tenant = parseTenantFromQuery(req.query.tenant);
   if (typeof req.query.tenant === 'string' && !tenant) {
@@ -254,14 +298,14 @@ publicRoutes.get('/integration-status', async (req, res) => {
     ]);
 
     res.json({
-      calendarId: calendarConfig.calendarId,
+      calendarId: maskEmail(calendarConfig.calendarId),
       calendarApiConfigured: calendarConfig.hasApiCredentials,
       calendarIcsConfigured: calendarConfig.hasIcsUrl,
       whatsappConfigured: evolutionStatus.configured,
       whatsappProvider: evolutionStatus.configured ? 'evolution' : null,
       whatsappConnectionState: evolutionStatus.configured ? evolutionStatus.connectionState : 'disabled',
       whatsappConnected: evolutionStatus.configured ? evolutionStatus.connected : false,
-      evolutionInstance: evolutionStatus.instanceName,
+      evolutionInstance: evolutionStatus.configured ? 'connected' : null,
       evolutionInstanceFound: evolutionDiagnostics.instanceFound,
       evolutionReadinessScore: evolutionDiagnostics.readinessScore,
       evolutionStatus: evolutionDiagnostics.overallStatus,
@@ -336,7 +380,14 @@ publicRoutes.get('/availability', async (req, res) => {
   }
 });
 
-publicRoutes.post('/bookings', async (req, res) => {
+const publicBookingRateLimit = createRateLimit({
+  windowMs: 60_000,
+  max: 15,
+  message: 'Muitas tentativas de agendamento em pouco tempo. Aguarde 1 minuto e tente novamente.',
+  keyPrefix: 'public-booking',
+});
+
+publicRoutes.post('/bookings', publicBookingRateLimit, async (req, res) => {
   const tenant = parseTenantFromQuery(req.query.tenant);
   if (typeof req.query.tenant === 'string' && !tenant) {
     return res.status(400).json({ error: 'Slug de tenant invalido.' });
@@ -364,8 +415,17 @@ publicRoutes.post('/bookings', async (req, res) => {
     return res.status(400).json({ error: 'Data inválida. Use YYYY-MM-DD.' });
   }
 
+  const nowTz = getCurrentTimezoneDateTime();
+  if (date < nowTz.date) {
+    return res.status(400).json({ error: 'Não é possível realizar agendamentos em datas passadas.' });
+  }
+
   if (!normalizedTime) {
     return res.status(400).json({ error: 'Horario invalido. Use HH:mm.' });
+  }
+
+  if (date === nowTz.date && toMinuteSlot(normalizedTime) <= nowTz.time) {
+    return res.status(400).json({ error: 'Não é possível realizar agendamentos em horários que já passaram.' });
   }
 
   try {
@@ -430,6 +490,9 @@ publicRoutes.post('/bookings', async (req, res) => {
       booking: normalizedBooking,
     });
   } catch (error) {
+    if (isBookingConflictError(error)) {
+      return res.status(409).json({ error: 'Horário já reservado.' });
+    }
     console.error('Erro ao criar solicitação de agendamento:', error);
     return res.status(500).json({ error: 'Erro ao criar solicitação de agendamento.' });
   }

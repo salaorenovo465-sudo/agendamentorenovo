@@ -1,4 +1,18 @@
-export type { WorkbenchEntity, OverviewData, TenantRecord, TenantRegistryValue } from './workbenchTypes';
+export type {
+  WorkbenchEntity,
+  OverviewData,
+  TenantRecord,
+  TenantRegistryValue,
+  ClientStatus,
+  ClientTone,
+  ClientFocusFilter,
+  ClientSortMode,
+  ClientInsight,
+  ClientBoardItem,
+  ClientsWorkspaceQuery,
+  ClientsWorkspaceColumnSlice,
+  ClientsWorkspaceResponse,
+} from './workbenchTypes';
 export { ENTITY_CONFIG } from './workbenchTypes';
 
 export {

@@ -5,17 +5,19 @@ import {
   Star, BarChart3, Percent,
 } from 'lucide-react';
 import type { AdminBooking } from './types';
+import { useMoneyPrivacy } from './MoneyPrivacyContext';
 
 /* ─── REVENUE CALCULATION ─── */
 function extractPrice(priceStr: string | null): number {
   if (!priceStr) return 0;
-  const match = priceStr.match(/(\d+)[,.]?(\d{0,2})/);
+  const match = priceStr.match(/[\d.]+(?:,\d{1,2})?|\d+(?:\.\d{1,2})?/);
   if (!match) return 0;
-  return parseFloat(`${match[1]}.${match[2] || '0'}`);
+  return parseFloat(match[0].replace(/\.(?=\d{3})/g, '').replace(',', '.')) || 0;
 }
 
 /* ─── ANALYTICS PANEL ─── */
 export function AnalyticsPanel({ bookings }: { bookings: AdminBooking[] }) {
+  const { maskCurrency } = useMoneyPrivacy();
   const stats = useMemo(() => {
     const confirmed = bookings.filter(b => b.status === 'confirmed');
     const pending = bookings.filter(b => b.status === 'pending');
@@ -59,8 +61,8 @@ export function AnalyticsPanel({ bookings }: { bookings: AdminBooking[] }) {
     <div className="space-y-5">
       {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard icon={DollarSign} label="Receita Confirmada" value={`R$ ${stats.revenue.toFixed(2)}`} accent="emerald" delay={0} />
-        <KPICard icon={TrendingUp} label="Receita Pendente" value={`R$ ${stats.pendingRevenue.toFixed(2)}`} accent="amber" delay={0.05} />
+        <KPICard icon={DollarSign} label="Receita Confirmada" value={maskCurrency(stats.revenue)} accent="emerald" delay={0} />
+        <KPICard icon={TrendingUp} label="Receita Pendente" value={maskCurrency(stats.pendingRevenue)} accent="amber" delay={0.05} />
         <KPICard icon={Percent} label="Taxa de Conversão" value={`${stats.conversionRate}%`} accent="violet" delay={0.1} />
         <KPICard icon={Clock} label="Horário Pico" value={stats.peakHour ? `${stats.peakHour[0]}:00` : '—'} accent="blue" delay={0.15} />
       </div>
@@ -91,7 +93,7 @@ export function AnalyticsPanel({ bookings }: { bookings: AdminBooking[] }) {
                       animate={{ width: `${(count / stats.maxCount) * 100}%` }}
                       transition={{ delay: 0.3 + i * 0.1, duration: 0.6 }}
                       className="h-full rounded-full"
-                      style={{ background: i === 0 ? 'var(--admin-accent)' : `rgba(155,123,78,${0.6 - i * 0.1})` }}
+                      style={{ background: i === 0 ? 'var(--admin-wine)' : `rgba(58, 10, 30, ${0.7 - i * 0.1})` }}
                     />
                   </div>
                 </div>
@@ -134,15 +136,9 @@ export function AnalyticsPanel({ bookings }: { bookings: AdminBooking[] }) {
 }
 
 /* ─── KPI CARD ─── */
-function KPICard({ icon: Icon, label, value, accent, delay = 0 }: {
-  icon: typeof DollarSign; label: string; value: string; accent: string; delay?: number;
+function KPICard({ icon: Icon, label, value, delay = 0 }: {
+  icon: typeof DollarSign; label: string; value: string; accent?: string; delay?: number;
 }) {
-  const colors: Record<string, string> = {
-    emerald: 'from-emerald-400 to-teal-500',
-    amber: 'from-amber-400 to-orange-500',
-    violet: 'from-violet-400 to-purple-500',
-    blue: 'from-blue-400 to-indigo-500',
-  };
   return (
     <motion.div
       initial={{ opacity: 0, y: 15 }}
@@ -150,7 +146,7 @@ function KPICard({ icon: Icon, label, value, accent, delay = 0 }: {
       transition={{ delay, duration: 0.4 }}
       className="admin-stat-card group"
     >
-      <div className={`admin-stat-icon bg-gradient-to-br ${colors[accent]}`}>
+      <div className="admin-stat-icon" style={{ background: 'linear-gradient(135deg, #3a0a1e, #4e1028)' }}>
         <Icon className="w-5 h-5 text-white" />
       </div>
       <div className="flex-1 min-w-0">
@@ -343,6 +339,7 @@ export function OccupancyBar({ bookings }: { bookings: AdminBooking[] }) {
 
 /* ─── 21. MOST PROFITABLE SERVICE ─── */
 export function MostProfitableService({ bookings }: { bookings: AdminBooking[] }) {
+  const { maskCurrency } = useMoneyPrivacy();
   const best = useMemo(() => {
     const revenues: Record<string, { total: number; count: number }> = {};
     bookings.filter(b => b.status === 'confirmed').forEach(b => {
@@ -368,7 +365,7 @@ export function MostProfitableService({ bookings }: { bookings: AdminBooking[] }
           </div>
           <div>
             <p className="text-base font-bold text-[var(--admin-text)]">{best.name}</p>
-            <p className="text-xs text-[var(--admin-text-muted)]">R$ {best.total.toFixed(2)} em {best.count} atendimentos</p>
+            <p className="text-xs text-[var(--admin-text-muted)]">{maskCurrency(best.total)} em {best.count} atendimentos</p>
           </div>
         </div>
       ) : (

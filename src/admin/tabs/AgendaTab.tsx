@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
 import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
+  ArrowLeft,
   CalendarPlus,
   CheckCircle2,
   Clock3,
   Download,
+  History,
   Loader2,
   Phone,
+  RotateCcw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -19,8 +22,8 @@ import {
 } from 'lucide-react';
 import { formatBrazilWhatsappInput, formatDateBR, toStringValue } from '../AdminUtils';
 import { exportBookingsCSV } from '../AdminFeatures';
-import { getBookingAvailability } from '../api';
-import type { AdminBooking, AdminCreateBookingPayload } from '../types';
+import { getBookingAvailability, listCompletedAdminBookings } from '../api';
+import type { AdminBooking, AdminBookingBoardCounts, AdminCreateBookingPayload } from '../types';
 import {
   createCollaboratorDraft,
   extractBookingServiceItems,
@@ -29,6 +32,7 @@ import {
   type ServiceCatalogItem,
 } from '../collaboratorUtils';
 import { DangerConfirmModal } from '../AdminHelpers';
+import { MoneyEyeButton, useMoneyPrivacy } from '../MoneyPrivacyContext';
 
 type SelectedAgendaService = {
   category: string;
@@ -84,7 +88,7 @@ const AGENDA_TIME_SLOTS = [
 
 const STATUS_LABELS: Record<AdminBooking['status'], string> = {
   pending: 'Pendente',
-  confirmed: 'Confirmado',
+  confirmed: 'Concluído',
   rejected: 'Rejeitado',
   completed: 'Finalizado',
 };
@@ -148,48 +152,103 @@ const summarizeAgendaServices = (selectedServices: SelectedAgendaService[]): { s
   };
 };
 
+const COMPLETED_BOARD_LIMIT = 20;
+const COMPLETED_HISTORY_PAGE_SIZE = 20;
+
+const readInitialHistoryUrlState = () => {
+  if (typeof window === 'undefined') {
+    return { open: false, q: '', from: '', to: '', prof: '' };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    open: params.get('agendaView') === 'finalizados',
+    q: params.get('q') || '',
+    from: params.get('from') || '',
+    to: params.get('to') || '',
+    prof: params.get('prof') || '',
+  };
+};
+
 export function AgendaTab({
+  adminKey,
+  tenantSlug,
   bookings,
+  boardCounts,
   bookingsLoading,
   dateScope,
+  onDateScopeChange,
+  dateFilter,
+  onDateFilterChange,
+  dateFilterEnd,
+  onDateFilterEndChange,
   dateLabel,
   busyBookingId,
   rescheduleMap,
   setRescheduleMap,
   onConfirm,
   onComplete,
+  onReopen,
   onReject,
   onDelete,
   onReschedule,
   onCreateBooking,
   onAssignProfessional,
   onClearHistory,
+  onOpenFullHistory,
   serviceCatalog,
   clients,
   professionals,
   defaultCreateDate,
 }: {
+  adminKey: string;
+  tenantSlug: string;
   bookings: AdminBooking[];
+  boardCounts?: AdminBookingBoardCounts | null;
   bookingsLoading: boolean;
   dateScope: 'all' | 'range';
+  onDateScopeChange: (scope: 'all' | 'range') => void;
+  dateFilter: string;
+  onDateFilterChange: (date: string) => void;
+  dateFilterEnd: string;
+  onDateFilterEndChange: (date: string) => void;
   dateLabel: string;
   busyBookingId: number | null;
   rescheduleMap: Record<number, { date: string; time: string }>;
   setRescheduleMap: Dispatch<SetStateAction<Record<number, { date: string; time: string }>>>;
   onConfirm: (booking: AdminBooking) => Promise<void>;
   onComplete: (booking: AdminBooking) => Promise<void>;
+  onReopen: (booking: AdminBooking) => Promise<void>;
   onReject: (booking: AdminBooking) => Promise<void>;
   onDelete: (booking: AdminBooking, masterPassword: string) => Promise<void>;
   onReschedule: (booking: AdminBooking) => Promise<void>;
   onCreateBooking: (payload: AdminCreateBookingPayload) => Promise<void>;
   onAssignProfessional: (booking: AdminBooking, professionalId: number | null) => Promise<void>;
   onClearHistory: (masterPassword?: string) => Promise<void>;
+  onOpenFullHistory?: () => void;
   serviceCatalog: ServiceCatalogCategory[];
   clients: Record<string, unknown>[];
   professionals: Record<string, unknown>[];
   defaultCreateDate: string;
 }) {
+  const { maskMoneyText } = useMoneyPrivacy();
   const now = new Date();
+  const initialUrlState = useMemo(() => readInitialHistoryUrlState(), []);
+  const [historyViewOpen, setHistoryViewOpen] = useState<boolean>(initialUrlState.open);
+  const [historySearchInput, setHistorySearchInput] = useState<string>(initialUrlState.q);
+  const [historySearchDebounced, setHistorySearchDebounced] = useState<string>(initialUrlState.q);
+  const [historyStartDate, setHistoryStartDate] = useState<string>(initialUrlState.from);
+  const [historyEndDate, setHistoryEndDate] = useState<string>(initialUrlState.to);
+  const [historyProfessionalId, setHistoryProfessionalId] = useState<string>(initialUrlState.prof);
+  const [historyItems, setHistoryItems] = useState<AdminBooking[]>([]);
+  const [historyTotal, setHistoryTotal] = useState<number>(0);
+  const [historyOverallTotal, setHistoryOverallTotal] = useState<number>(0);
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const [historyHasMore, setHistoryHasMore] = useState<boolean>(false);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [historyLoadingMore, setHistoryLoadingMore] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string>('');
+  const historyAbortRef = useRef<AbortController | null>(null);
+  const historyRequestSeqRef = useRef<number>(0);
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateBookingForm>(() => buildInitialForm(serviceCatalog, defaultCreateDate));
   const [serviceQuery, setServiceQuery] = useState('');
@@ -233,7 +292,125 @@ export function AgendaTab({
   const pending = bookings.filter((booking) => booking.status === 'pending' && !isOverdue(booking));
   const confirmed = bookings.filter((booking) => booking.status === 'confirmed' && !isOverdue(booking));
   const overdue = bookings.filter((booking) => isOverdue(booking));
-  const completed = bookings.filter((booking) => booking.status === 'completed');
+  const completed = useMemo(
+    () => bookings.filter((booking) => booking.status === 'completed').slice(0, COMPLETED_BOARD_LIMIT),
+    [bookings],
+  );
+  const completedTotalCount = boardCounts?.completed ?? completed.length;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setHistorySearchDebounced(historySearchInput.trim());
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [historySearchInput]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    if (historyViewOpen) {
+      url.searchParams.set('agendaView', 'finalizados');
+      if (historySearchDebounced) url.searchParams.set('q', historySearchDebounced);
+      else url.searchParams.delete('q');
+      if (historyStartDate) url.searchParams.set('from', historyStartDate);
+      else url.searchParams.delete('from');
+      if (historyEndDate) url.searchParams.set('to', historyEndDate);
+      else url.searchParams.delete('to');
+      if (historyProfessionalId) url.searchParams.set('prof', historyProfessionalId);
+      else url.searchParams.delete('prof');
+    } else {
+      url.searchParams.delete('agendaView');
+      url.searchParams.delete('q');
+      url.searchParams.delete('from');
+      url.searchParams.delete('to');
+      url.searchParams.delete('prof');
+    }
+    window.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
+  }, [historyViewOpen, historySearchDebounced, historyStartDate, historyEndDate, historyProfessionalId]);
+
+  const fetchCompletedHistoryPage = useCallback(
+    async (targetPage: number, append: boolean) => {
+      if (!adminKey) return;
+
+      if (historyAbortRef.current) {
+        historyAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      historyAbortRef.current = controller;
+      const reqSeq = ++historyRequestSeqRef.current;
+
+      if (append) {
+        setHistoryLoadingMore(true);
+      } else {
+        setHistoryLoading(true);
+      }
+      setHistoryError('');
+
+      try {
+        const result = await listCompletedAdminBookings(
+          adminKey,
+          {
+            search: historySearchDebounced || undefined,
+            startDate: historyStartDate || undefined,
+            endDate: historyEndDate || undefined,
+            professionalId: historyProfessionalId || undefined,
+            page: targetPage,
+            limit: COMPLETED_HISTORY_PAGE_SIZE,
+          },
+          tenantSlug,
+          controller.signal,
+        );
+
+        if (reqSeq !== historyRequestSeqRef.current || controller.signal.aborted) {
+          return;
+        }
+
+        setHistoryItems((current) => {
+          if (!append) return result.items;
+          const existingIds = new Set(current.map((item) => item.id));
+          const dedupedNew = result.items.filter((item) => !existingIds.has(item.id));
+          return [...current, ...dedupedNew];
+        });
+        setHistoryTotal(result.total);
+        setHistoryOverallTotal(result.overallCompletedTotal);
+        setHistoryPage(result.page);
+        setHistoryHasMore(result.hasMore);
+      } catch (err) {
+        if (controller.signal.aborted || reqSeq !== historyRequestSeqRef.current) {
+          return;
+        }
+        setHistoryError(err instanceof Error ? err.message : 'Erro ao carregar histórico de finalizados.');
+      } finally {
+        if (reqSeq === historyRequestSeqRef.current && !controller.signal.aborted) {
+          setHistoryLoading(false);
+          setHistoryLoadingMore(false);
+        }
+      }
+    },
+    [adminKey, tenantSlug, historySearchDebounced, historyStartDate, historyEndDate, historyProfessionalId],
+  );
+
+  useEffect(() => {
+    if (!historyViewOpen) return;
+    void fetchCompletedHistoryPage(1, false);
+    return () => {
+      if (historyAbortRef.current) {
+        historyAbortRef.current.abort();
+      }
+    };
+  }, [historyViewOpen, fetchCompletedHistoryPage]);
+
+  const hasActiveHistoryFilters = Boolean(
+    historySearchDebounced || historyStartDate || historyEndDate || historyProfessionalId,
+  );
+
+  const handleResetHistoryFilters = () => {
+    setHistorySearchInput('');
+    setHistorySearchDebounced('');
+    setHistoryStartDate('');
+    setHistoryEndDate('');
+    setHistoryProfessionalId('');
+  };
 
   const currentCategory = serviceCatalog.find((category) => category.category === createForm.category) || serviceCatalog[0];
   const currentServices = currentCategory?.items || [];
@@ -393,14 +570,15 @@ export function AgendaTab({
 
   const agendaStats = useMemo(() => {
     const active = pending.length + confirmed.length + overdue.length;
-    const assigned = bookings.filter((booking) => booking.professionalId).length;
+    const totalCount = boardCounts?.total ?? bookings.length;
+    const assignedCount = boardCounts?.assigned ?? bookings.filter((booking) => booking.professionalId).length;
 
     return [
-      { label: dateScope === 'all' ? 'Total geral' : 'Total no periodo', value: bookings.length, tone: 'wine' },
+      { label: dateScope === 'all' ? 'Total geral' : 'Total no periodo', value: totalCount, tone: 'wine' },
       { label: 'Operacao ativa', value: active, tone: 'gold' },
-      { label: 'Com colaborador', value: assigned, tone: 'green' },
+      { label: 'Com colaborador', value: assignedCount, tone: 'green' },
     ];
-  }, [bookings, dateScope, overdue.length, pending.length, confirmed.length]);
+  }, [boardCounts, bookings, dateScope, overdue.length, pending.length, confirmed.length]);
 
   useEffect(() => {
     if (!createOpen || !createForm.date) return;
@@ -481,6 +659,9 @@ export function AgendaTab({
       await onDelete(deleteBookingTarget, masterPassword);
       if (expandedBookingId === deleteBookingTarget.id) {
         closeExpandedPanel();
+      }
+      if (historyViewOpen) {
+        void fetchCompletedHistoryPage(1, false);
       }
       setDeleteBookingTarget(null);
     } finally {
@@ -590,7 +771,7 @@ export function AgendaTab({
           </div>
           <div>
             <span>Valor</span>
-            <strong>{booking.servicePrice || 'Sob consulta'}</strong>
+            <strong>{booking.servicePrice ? maskMoneyText(booking.servicePrice) : 'Sob consulta'}</strong>
           </div>
           <div>
             <span>Colaborador</span>
@@ -667,6 +848,21 @@ export function AgendaTab({
               <Sparkles style={{ width: 12, height: 12 }} /> Finalizar
             </button>
           )}
+          {booking.status === 'completed' && (
+            <button
+              disabled={busy}
+              onClick={async () => {
+                await onReopen(booking);
+                closeExpandedPanel();
+                if (historyViewOpen) {
+                  void fetchCompletedHistoryPage(1, false);
+                }
+              }}
+              className="admin-btn-outline"
+            >
+              <RotateCcw style={{ width: 12, height: 12 }} /> Reabrir
+            </button>
+          )}
           {booking.status !== 'rejected' && booking.status !== 'completed' && (
             <button disabled={busy} onClick={() => void onReject(booking)} className="admin-btn-danger">
               <XCircle style={{ width: 12, height: 12 }} /> Rejeitar
@@ -740,73 +936,332 @@ export function AgendaTab({
   };
 
   const boardColumns = [
-    ...(overdue.length > 0 ? [{ key: 'overdue', label: 'Atrasados', tone: 'danger', items: overdue, overdue: true }] : []),
-    { key: 'pending', label: 'Pendentes', tone: 'warning', items: pending, overdue: false },
-    { key: 'confirmed', label: 'Confirmados', tone: 'success', items: confirmed, overdue: false },
-    { key: 'completed', label: 'Finalizados', tone: 'done', items: completed, overdue: false },
+    { key: 'overdue', label: 'Atrasados', tone: 'danger', items: overdue, totalCount: overdue.length, overdue: true },
+    { key: 'pending', label: 'Pendentes', tone: 'warning', items: pending, totalCount: pending.length, overdue: false },
+    { key: 'confirmed', label: 'Concluídos', tone: 'success', items: confirmed, totalCount: confirmed.length, overdue: false },
+    { key: 'completed', label: 'Finalizados', tone: 'done', items: completed, totalCount: completedTotalCount, overdue: false },
   ];
   const expandedBooking = expandedBookingId !== null
-    ? bookings.find((booking) => booking.id === expandedBookingId) || null
+    ? bookings.find((booking) => booking.id === expandedBookingId)
+      || historyItems.find((booking) => booking.id === expandedBookingId)
+      || null
     : null;
   const expandedBookingOverdue = expandedBookingId !== null && overdue.some((booking) => booking.id === expandedBookingId);
 
   return (
     <div className="agenda-page-shell">
       <section className="agenda-command-center">
-        <div className="agenda-command-copy">
-          <span className="agenda-eyebrow"><Zap style={{ width: 13, height: 13 }} /> Painel quantico de agenda</span>
-          <h2>Agenda operacional - {dateLabel}</h2>
-          <p>Controle os horarios, resolva atrasos, confirme clientes e crie novos agendamentos sem sair desta aba.</p>
-        </div>
+        <div className="agenda-command-top">
+          <div className="agenda-command-copy">
+            <h2>{historyViewOpen ? 'Histórico de Finalizados' : `Agenda operacional - ${dateLabel}`}</h2>
+            <p>
+              {historyViewOpen
+                ? 'Consulte todo o histórico de atendimentos concluídos com busca no servidor, filtros e carregamento sob demanda.'
+                : 'Controle os horarios, resolva atrasos, confirme clientes e crie novos agendamentos sem sair desta aba.'}
+            </p>
+          </div>
 
-        <div className="agenda-command-actions">
-          {bookings.length > 0 && (
-            <button onClick={() => exportBookingsCSV(bookings)} className="admin-btn-outline agenda-header-btn">
-              <Download className="w-3 h-3" /> Exportar CSV
+          <div className="agenda-command-actions">
+            <MoneyEyeButton variant="compact" />
+            {historyViewOpen ? (
+              <button
+                type="button"
+                onClick={() => {
+                  closeExpandedPanel();
+                  setHistoryViewOpen(false);
+                }}
+                className="admin-btn-outline agenda-header-btn"
+              >
+                <ArrowLeft style={{ width: 14, height: 14 }} /> Voltar para Agenda
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  closeExpandedPanel();
+                  if (onOpenFullHistory) {
+                    onOpenFullHistory();
+                  } else {
+                    setHistoryViewOpen(true);
+                  }
+                }}
+                className="admin-btn-outline agenda-header-btn"
+              >
+                <History style={{ width: 14, height: 14 }} /> Ver histórico completo
+              </button>
+            )}
+            {bookings.length > 0 && (
+              <button onClick={() => exportBookingsCSV(historyViewOpen && historyItems.length > 0 ? historyItems : bookings)} className="admin-btn-outline agenda-header-btn">
+                <Download className="w-3 h-3" /> Exportar CSV
+              </button>
+            )}
+            <button
+              onClick={() => setClearHistoryModalOpen(true)}
+              className="admin-btn-danger agenda-header-btn"
+              disabled={clearingHistory}
+            >
+              {clearingHistory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Limpar historico
             </button>
-          )}
-          <button
-            onClick={() => setClearHistoryModalOpen(true)}
-            className="admin-btn-danger agenda-header-btn"
-            disabled={clearingHistory}
-          >
-            {clearingHistory ? <Loader2 className="w-3 h-3 animate-spin" /> : <Trash2 className="w-3 h-3" />} Limpar historico
-          </button>
-          <button onClick={openCreateModal} className="admin-btn-primary agenda-new-booking-btn">
-            <CalendarPlus style={{ width: 16, height: 16 }} /> Novo agendamento
-          </button>
+            <button onClick={openCreateModal} className="admin-btn-primary agenda-new-booking-btn">
+              <CalendarPlus style={{ width: 15, height: 15 }} /> Novo agendamento
+            </button>
+          </div>
         </div>
 
-        <div className="agenda-stat-grid">
-          {agendaStats.map((stat) => (
-            <div key={stat.label} className={`agenda-stat-card agenda-stat-${stat.tone}`}>
-              <span>{stat.label}</span>
-              <strong>{stat.value}</strong>
+        <div className="agenda-command-bottom">
+          <div className="agenda-toolbar-left">
+            <div className="agenda-stat-grid">
+              {agendaStats.map((stat) => (
+                <div key={stat.label} className={`agenda-stat-card agenda-stat-${stat.tone}`}>
+                  <span>{stat.label}</span>
+                  <strong>{stat.value}</strong>
+                </div>
+              ))}
             </div>
-          ))}
+            {overdue.length > 0 && !historyViewOpen && (
+              <div className="agenda-overdue-alert" title={`${overdue.length} agendamento(s) atrasado(s) precisam de finalizacao, remarcacao ou rejeicao.`}>
+                <AlertTriangle style={{ width: 14, height: 14, flexShrink: 0 }} />
+                <span>{overdue.length} atrasado(s) pendente(s) de acao</span>
+              </div>
+            )}
+          </div>
+
+          {!historyViewOpen && (
+            <div className="agenda-toolbar-scope">
+              <div className="agenda-scope-toggle" role="group" aria-label="Filtro de exibição da agenda">
+                <button
+                  type="button"
+                  onClick={() => onDateScopeChange('all')}
+                  className={dateScope === 'all' ? 'active' : ''}
+                >
+                  Geral
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDateScopeChange('range')}
+                  className={dateScope === 'range' ? 'active' : ''}
+                >
+                  Período
+                </button>
+              </div>
+              {dateScope === 'range' && (
+                <div className="agenda-scope-dates">
+                  <span>De</span>
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => onDateFilterChange(e.target.value)}
+                    className="admin-input-sm"
+                  />
+                  <span>Até</span>
+                  <input
+                    type="date"
+                    value={dateFilterEnd}
+                    onChange={(e) => onDateFilterEndChange(e.target.value)}
+                    className="admin-input-sm"
+                  />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
 
-      {overdue.length > 0 && (
-        <div className="agenda-overdue-alert">
-          <AlertTriangle style={{ width: 18, height: 18, flexShrink: 0 }} />
-          <span>{overdue.length} agendamento(s) atrasado(s) precisam de finalizacao, remarcacao ou rejeicao.</span>
-        </div>
-      )}
+      {historyViewOpen ? (
+        <section className="agenda-history-shell" aria-label="Histórico completo de agendamentos finalizados">
+          <div className="agenda-history-filters">
+            <div className="agenda-history-search">
+              <Search style={{ width: 14, height: 14, flexShrink: 0 }} />
+              <input
+                type="search"
+                value={historySearchInput}
+                onChange={(e) => setHistorySearchInput(e.target.value)}
+                placeholder="Buscar por cliente, serviço, telefone ou #ID (ex: #55)..."
+                aria-label="Buscar finalizados por cliente, serviço, telefone ou ID"
+              />
+              {historySearchInput && (
+                <button
+                  type="button"
+                  onClick={() => setHistorySearchInput('')}
+                  className="agenda-history-clear-input"
+                  aria-label="Limpar busca"
+                >
+                  <X style={{ width: 13, height: 13 }} />
+                </button>
+              )}
+            </div>
 
-      {bookingsLoading ? (
+            <div className="agenda-history-filter-group">
+              <div className="agenda-scope-dates">
+                <span>De</span>
+                <input
+                  type="date"
+                  value={historyStartDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setHistoryStartDate(val);
+                    if (val && historyEndDate && val > historyEndDate) {
+                      setHistoryEndDate(val);
+                    }
+                  }}
+                  className="admin-input-sm"
+                  aria-label="Data inicial de finalização"
+                />
+                <span>Até</span>
+                <input
+                  type="date"
+                  value={historyEndDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (!historyStartDate || !val || val >= historyStartDate) {
+                      setHistoryEndDate(val);
+                    }
+                  }}
+                  className="admin-input-sm"
+                  aria-label="Data final de finalização"
+                />
+              </div>
+
+              <select
+                value={historyProfessionalId}
+                onChange={(e) => setHistoryProfessionalId(e.target.value)}
+                className="admin-input-sm agenda-history-prof-select"
+                aria-label="Filtrar por colaborador responsável"
+              >
+                <option value="">Todos os colaboradores</option>
+                {collaborators.map((collab) => (
+                  <option key={collab.id} value={String(collab.id)}>
+                    {collab.name}
+                  </option>
+                ))}
+                <option value="unassigned">Sem colaborador</option>
+              </select>
+
+              {hasActiveHistoryFilters && (
+                <button
+                  type="button"
+                  onClick={handleResetHistoryFilters}
+                  className="admin-btn-outline agenda-header-btn"
+                >
+                  Limpar filtros
+                </button>
+              )}
+            </div>
+
+            <div className="agenda-history-counter">
+              <span>
+                Exibindo <strong>{historyItems.length}</strong> de <strong>{historyTotal}</strong> finalizado(s)
+              </span>
+            </div>
+          </div>
+
+          <div className="agenda-history-body admin-scroll">
+            {historyLoading ? (
+              <div className="agenda-loading-state">
+                <Loader2 style={{ width: 18, height: 18 }} className="animate-spin" /> Carregando histórico de finalizados...
+              </div>
+            ) : historyError ? (
+              <div className="agenda-history-empty agenda-history-error" role="alert">
+                <AlertTriangle style={{ width: 20, height: 20 }} />
+                <strong>Não foi possível carregar o histórico de finalizados</strong>
+                <p>{historyError}</p>
+                <button
+                  type="button"
+                  onClick={() => void fetchCompletedHistoryPage(1, false)}
+                  className="admin-btn-primary agenda-header-btn"
+                >
+                  Tentar novamente
+                </button>
+              </div>
+            ) : historyItems.length === 0 ? (
+              <div className="agenda-history-empty">
+                {historyOverallTotal === 0 && !hasActiveHistoryFilters ? (
+                  <>
+                    <strong>Nenhum card finalizado</strong>
+                    <p>Ainda não existem agendamentos finalizados registrados para esta unidade.</p>
+                  </>
+                ) : (
+                  <>
+                    <strong>Nenhum resultado para os filtros selecionados</strong>
+                    <p>Ajuste a busca, o período ou o colaborador selecionado para consultar outros agendamentos.</p>
+                    {hasActiveHistoryFilters && (
+                      <button
+                        type="button"
+                        onClick={handleResetHistoryFilters}
+                        className="admin-btn-outline agenda-header-btn"
+                      >
+                        Limpar filtros
+                      </button>
+                    )}
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="agenda-history-grid">
+                  {historyItems.map((booking) => renderBookingCard(booking, false))}
+                </div>
+
+                <div className="agenda-history-footer">
+                  {historyHasMore ? (
+                    <button
+                      type="button"
+                      disabled={historyLoadingMore}
+                      onClick={() => void fetchCompletedHistoryPage(historyPage + 1, true)}
+                      className="admin-btn-primary agenda-header-btn"
+                    >
+                      {historyLoadingMore ? (
+                        <>
+                          <Loader2 style={{ width: 14, height: 14 }} className="animate-spin" /> Carregando mais...
+                        </>
+                      ) : (
+                        <>Carregar mais finalizados ({Math.min(COMPLETED_HISTORY_PAGE_SIZE, historyTotal - historyItems.length)} restantes)</>
+                      )}
+                    </button>
+                  ) : (
+                    <span className="agenda-history-end-note">
+                      Todos os {historyTotal} resultado(s) foram carregados.
+                    </span>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </section>
+      ) : bookingsLoading ? (
         <div className="agenda-loading-state">
           <Loader2 style={{ width: 18, height: 18 }} className="animate-spin" /> Carregando agenda...
         </div>
       ) : (
-        <div className="agenda-board" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(260px, 1fr))` }}>
+        <div className="agenda-board" style={{ gridTemplateColumns: `repeat(${boardColumns.length}, minmax(0, 1fr))` }}>
           {boardColumns.map((column) => (
             <section key={column.key} className={`agenda-board-column agenda-board-${column.tone}`}>
               <header>
                 <div>
-                  <span>{column.label}</span>
-                  <strong>{column.items.length}</strong>
+                  <span>
+                    {column.label}
+                    {column.key === 'completed' && column.totalCount > column.items.length ? (
+                      <small className="agenda-column-limit-tag"> ({column.items.length} recentes)</small>
+                    ) : null}
+                  </span>
+                  <strong>{column.totalCount}</strong>
                 </div>
+                {column.key === 'completed' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      closeExpandedPanel();
+                      if (onOpenFullHistory) {
+                        onOpenFullHistory();
+                      } else {
+                        setHistoryViewOpen(true);
+                      }
+                    }}
+                    className="agenda-column-history-link"
+                  >
+                    Ver histórico completo
+                  </button>
+                )}
               </header>
               <div
                 className={`agenda-column-scroll ${scrollingColumns[column.key] ? 'is-scrolling' : ''}`}
@@ -815,7 +1270,26 @@ export function AgendaTab({
                 {column.items.length === 0 ? (
                   <div className="agenda-empty-column">Nenhum agendamento nesta etapa.</div>
                 ) : (
-                  column.items.map((booking) => renderBookingCard(booking, column.overdue))
+                  <>
+                    {column.items.map((booking) => renderBookingCard(booking, column.overdue))}
+                    {column.key === 'completed' && column.totalCount > column.items.length && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          closeExpandedPanel();
+                          if (onOpenFullHistory) {
+                            onOpenFullHistory();
+                          } else {
+                            setHistoryViewOpen(true);
+                          }
+                        }}
+                        className="agenda-column-view-all-btn"
+                      >
+                        <History style={{ width: 13, height: 13 }} />
+                        Ver histórico completo ({column.totalCount})
+                      </button>
+                    )}
+                  </>
                 )}
               </div>
             </section>
@@ -1135,7 +1609,7 @@ export function AgendaTab({
                   <p>{serviceSummary.service || 'Selecione um ou mais servicos'}</p>
                   <div>
                     <strong>{createForm.date ? formatDateBR(createForm.date) : '--'} as {createForm.time}</strong>
-                    <small>{serviceSummary.servicePrice || 'Valor sob consulta'}</small>
+                    <small>{serviceSummary.servicePrice ? maskMoneyText(serviceSummary.servicePrice) : 'Valor sob consulta'}</small>
                   </div>
                   <div>
                     <strong>{createForm.professionalName || 'Sem colaborador definido'}</strong>

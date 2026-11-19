@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 
 import { inboxStore } from '../../db/inboxStore';
 import { createRateLimit } from '../../middleware/rateLimit';
@@ -49,7 +49,7 @@ messageRoutes.post('/messages', whatsappSendRateLimit, async (req, res) => {
   }
 });
 
-messageRoutes.post('/messages/attachment', whatsappSendRateLimit, async (req, res) => {
+messageRoutes.post('/messages/attachment', express.json({ limit: '50mb' }), whatsappSendRateLimit, async (req, res) => {
   const threadId = parseThreadId(typeof req.body?.conversationId === 'number' ? String(req.body.conversationId) : req.body?.conversationId);
   if (!threadId) {
     return res.status(400).json({ error: 'conversationId invalido.' });

@@ -3,12 +3,17 @@ export { requestAdmin, withTenantQuery, API_BASE } from './apiCore';
 
 export {
   listAdminBookings,
+  listAdminBookingsBoard,
+  getAdminBookingsCalendar,
+  listCompletedAdminBookings,
+  listUnifiedAdminBookingsHistory,
   createAdminBooking,
   assignProfessionalToAdminBooking,
   getBookingAvailability,
   deleteAdminBooking,
   resetAdminBookingsHistory,
   completeAdminBooking,
+  reopenAdminBooking,
   confirmAdminBooking,
   rejectAdminBooking,
   rescheduleAdminBooking,
@@ -51,6 +56,8 @@ export type { AdminWhatsappStatus } from './whatsappApi';
 
 export {
   getWorkbenchOverviewForAdmin,
+  getDashboardFinanceForAdmin,
+  getSupabaseReadinessForAdmin,
   listWorkbenchEntityForAdmin,
   createWorkbenchEntityForAdmin,
   updateWorkbenchEntityForAdmin,
@@ -61,6 +68,17 @@ export {
   markFinancePaidForAdmin,
   findClientByPhoneForAdmin,
   registerClientForAdmin,
+  getClientsWorkspaceForAdmin,
+} from './workbenchApi';
+export type {
+  ClientWorkspaceStatus,
+  ClientWorkspaceTone,
+  ClientWorkspaceFocus,
+  ClientWorkspaceSort,
+  ClientWorkspaceInsight,
+  ClientWorkspaceItem,
+  ClientWorkspaceColumnSlice,
+  ClientsWorkspaceResponse,
 } from './workbenchApi';
 
 export {

@@ -9,7 +9,7 @@ import type {
 import { requestAdmin, withTenantQuery } from './apiCore';
 
 export type AdminWhatsappStatus = {
-  provider: 'baileys';
+  provider: 'evolution';
   enabled: boolean;
   connectionState: 'disabled' | 'disconnected' | 'connecting' | 'qr' | 'connected';
   connected: boolean;

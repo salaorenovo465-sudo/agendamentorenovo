@@ -79,6 +79,14 @@ const inferCompanyName = async (tenantSlug: string, settings: Record<string, unk
   return 'Empresa de estetica';
 };
 
+const getSettingsSafe = async (tenantSlug: string): Promise<Record<string, unknown>> => {
+  try {
+    return await workbenchStore.getSettings(tenantSlug);
+  } catch {
+    return {};
+  }
+};
+
 const saveInstanceNameToSettings = async (
   tenantSlug: string,
   settings: Record<string, unknown>,
@@ -93,7 +101,11 @@ const saveInstanceNameToSettings = async (
     evolutionInstance: instanceName,
   };
 
-  await workbenchStore.saveSettings(nextSettings, tenantSlug);
+  try {
+    await workbenchStore.saveSettings(nextSettings, tenantSlug);
+  } catch {
+    // ignore if Supabase is temporarily unreachable
+  }
 };
 
 const resolveEvolutionConfig = async (
@@ -101,11 +113,14 @@ const resolveEvolutionConfig = async (
   preferredInstanceName?: string,
 ): Promise<ResolvedEvolutionConfig | null> => {
   const tenantSlug = normalizeTenantSlug(tenantSlugRaw);
-  const settings = await workbenchStore.getSettings(tenantSlug);
+  const settings = await getSettingsSafe(tenantSlug);
   const companyName = await inferCompanyName(tenantSlug, settings);
 
   const computedInstanceName =
-    getString(settings.evolutionInstance) || getString(preferredInstanceName) || buildInstanceName(companyName, tenantSlug);
+    getString(settings.evolutionInstance) ||
+    getString(preferredInstanceName) ||
+    getString(process.env.EVOLUTION_INSTANCE) ||
+    buildInstanceName(companyName, tenantSlug);
 
   const resolved = resolveTenantBridgeConfig(
     tenantSlug,
@@ -197,9 +212,9 @@ const toStatusPayload = (
 
 const missingConfigStatus = async (tenantSlugRaw?: string): Promise<EvolutionInstanceStatus> => {
   const tenantSlug = normalizeTenantSlug(tenantSlugRaw);
-  const settings = await workbenchStore.getSettings(tenantSlug);
+  const settings = await getSettingsSafe(tenantSlug);
   const companyName = await inferCompanyName(tenantSlug, settings);
-  const instanceName = getString(settings.evolutionInstance) || buildInstanceName(companyName, tenantSlug);
+  const instanceName = getString(settings.evolutionInstance) || getString(process.env.EVOLUTION_INSTANCE) || buildInstanceName(companyName, tenantSlug);
 
   return {
     tenantSlug,
@@ -307,6 +322,8 @@ export const createEvolutionInstance = async (
     }
   }
 
+  void configureEvolutionWebhook(resolved.tenantSlug);
+
   return getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: true });
 };
 
@@ -330,6 +347,50 @@ export const logoutEvolutionInstance = async (tenantSlugRaw?: string): Promise<E
   }
 
   return getEvolutionInstanceStatus(resolved.tenantSlug, { includeQr: true });
+};
+
+export const configureEvolutionWebhook = async (
+  tenantSlugRaw?: string,
+  targetUrl?: string,
+): Promise<{ ok: boolean; error?: string }> => {
+  const resolved = await resolveEvolutionConfig(tenantSlugRaw);
+  if (!resolved) {
+    return { ok: false, error: 'Configuração Evolution não encontrada para este tenant.' };
+  }
+
+  const webhookSecret = getString(resolved.settings.evolutionWebhookSecret) || process.env.EVOLUTION_WEBHOOK_SECRET || '';
+  const port = process.env.PORT || '3101';
+  const publicBaseUrl = (targetUrl || process.env.RENDER_EXTERNAL_URL || process.env.PUBLIC_APP_URL || `http://localhost:${port}`).replace(/\/+$/, '');
+  const webhookUrl = `${publicBaseUrl}/api/integrations/evolution/${encodeURIComponent(resolved.tenantSlug)}/webhook`;
+
+  try {
+    await evolutionApiRequest(
+      resolved.evolutionUrl,
+      resolved.evolutionApiKey,
+      'POST',
+      `/webhook/set/${encodeURIComponent(resolved.instanceName)}`,
+      {
+        webhook: {
+          enabled: true,
+          url: webhookUrl,
+          byEvents: false,
+          base64: false,
+          headers: webhookSecret ? { 'x-webhook-secret': webhookSecret } : {},
+          events: [
+            'MESSAGES_UPSERT',
+            'MESSAGES_UPDATE',
+            'SEND_MESSAGE',
+            'CONNECTION_UPDATE',
+          ],
+        },
+      },
+    );
+    return { ok: true };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Falha ao registrar webhook na Evolution.';
+    console.warn(`[Evolution Webhook] Falha ao configurar webhook da instância ${resolved.instanceName}:`, message);
+    return { ok: false, error: message };
+  }
 };
 
 export const refreshEvolutionInstanceQr = async (tenantSlugRaw?: string): Promise<EvolutionInstanceStatus> => {

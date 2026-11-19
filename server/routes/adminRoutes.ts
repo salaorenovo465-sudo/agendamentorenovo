@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router } from 'express';
 
 import { bookingStore } from '../db/bookingStore';
@@ -19,6 +20,7 @@ import {
   logoutWhatsapp,
   reconnectWhatsapp,
   sendWhatsappMessageToCustomer,
+  syncWhatsappStatusFromEvolution,
   whatsappConfig,
 } from '../services/whatsappService';
 import { getOutgoingDeliveryStatus } from '../services/whatsappDeliveryStatus';
@@ -27,10 +29,19 @@ import {
   notifyCustomerRejectedBooking,
   notifyCustomerRescheduledBooking,
 } from '../services/notificationService';
-import { logoutEvolutionInstance } from '../services/evolutionInstanceService';
 import type { BookingRecord, BookingServiceItem } from '../types';
 import { normalizeWhatsappPhoneWithPlus } from '../utils/phone';
 import { toPositiveInt, parseId as parseBookingId, getTodayDate } from '../utils/helpers';
+import { diffDaysIso, getMonthBounds, isValidIsoDate } from '../db/workbench/dashboardHelpers';
+
+const safeEqualString = (left: string, right: string): boolean => {
+  const leftBuf = Buffer.from(left, 'utf8');
+  const rightBuf = Buffer.from(right, 'utf8');
+  if (leftBuf.length !== rightBuf.length || leftBuf.length === 0) {
+    return false;
+  }
+  return crypto.timingSafeEqual(leftBuf, rightBuf);
+};
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_REGEX = /^\d{2}:\d{2}(:\d{2})?$/;
@@ -54,10 +65,8 @@ const getPayloadString = (payload: Record<string, unknown> | null, key: string):
   return typeof value === 'string' ? value.trim() : '';
 };
 
-const getRequestFallbackMasterPassword = (req: { headers: Record<string, unknown> }): string => {
-  const adminHeader = req.headers['x-admin-key'];
-  const adminKey = Array.isArray(adminHeader) ? adminHeader[0] : adminHeader;
-  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || (typeof adminKey === 'string' ? adminKey.trim() : '');
+const getRequestFallbackMasterPassword = (_req: { headers: Record<string, unknown> }): string => {
+  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || '';
 };
 
 const resolveMasterPassword = (settings: Record<string, unknown>, fallbackPassword: string): string => {
@@ -83,7 +92,12 @@ const validateMasterPassword = async (
     ? await workbenchStore.getSettings(tenant || undefined)
     : {};
 
-  if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+  const expectedMaster = resolveMasterPassword(settings, getRequestFallbackMasterPassword(req));
+  if (!expectedMaster) {
+    return { ok: false, status: 500, error: 'Senha master não configurada. Defina ADMIN_MASTER_PASSWORD no servidor.' };
+  }
+
+  if (!safeEqualString(masterPassword, expectedMaster)) {
     return { ok: false, status: 403, error: 'Senha master invalida.' };
   }
 
@@ -252,20 +266,269 @@ adminRoutes.get('/inbox/stream', (req, res) => {
 });
 
 adminRoutes.get('/bookings', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const scope = req.query.scope === 'all' ? 'all' : 'range';
-  const date = typeof req.query.date === 'string' && DATE_REGEX.test(req.query.date) ? req.query.date : getTodayDate();
-  const endDate = typeof req.query.endDate === 'string' && DATE_REGEX.test(req.query.endDate) ? req.query.endDate : null;
+  const rawDate = typeof req.query.date === 'string' ? req.query.date.trim() : '';
+  if (scope === 'range' && rawDate && !DATE_REGEX.test(rawDate)) {
+    return res.status(400).json({ error: 'Data inicial invalida. Use YYYY-MM-DD.' });
+  }
+  const date = rawDate && DATE_REGEX.test(rawDate) ? rawDate : getTodayDate();
+
+  const rawEndDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+  if (rawEndDate && !DATE_REGEX.test(rawEndDate)) {
+    return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+  }
+  const endDate = rawEndDate && DATE_REGEX.test(rawEndDate) ? rawEndDate : null;
+
+  const mode = req.query.mode === 'full' ? 'full' : 'board';
+  const rawCompletedLimit = typeof req.query.completedLimit === 'string' ? Number(req.query.completedLimit) : 20;
+  if (!Number.isFinite(rawCompletedLimit) || rawCompletedLimit < 1 || rawCompletedLimit > 50) {
+    return res.status(400).json({ error: 'completedLimit deve estar entre 1 e 50.' });
+  }
+  const completedLimit = Math.trunc(rawCompletedLimit);
 
   try {
-    const bookings = scope === 'all'
-      ? await bookingStore.listAll()
-      : endDate
-        ? await bookingStore.listByDateRange(date, endDate)
-        : await bookingStore.listByDate(date);
-    return res.json({ date: scope === 'all' ? null : date, endDate: scope === 'all' ? null : endDate, scope, bookings });
+    if (mode === 'full') {
+      const bookings = scope === 'all'
+        ? await bookingStore.listAll(tenant)
+        : endDate
+          ? await bookingStore.listByDateRange(date, endDate, tenant)
+          : await bookingStore.listByDate(date, tenant);
+      return res.json({ date: scope === 'all' ? null : date, endDate: scope === 'all' ? null : endDate, scope, mode, bookings });
+    }
+
+    const board = await bookingStore.listBoardBookings({
+      scope,
+      startDate: scope === 'all' ? null : date,
+      endDate: scope === 'all' ? null : (endDate || date),
+      tenantSlug: tenant,
+      completedLimit,
+    });
+
+    return res.json({
+      date: scope === 'all' ? null : date,
+      endDate: scope === 'all' ? null : endDate,
+      scope,
+      mode,
+      bookings: board.bookings,
+      counts: board.counts,
+      completedLimit: board.completedLimit,
+      completedTotal: board.completedTotal,
+      hasMoreCompleted: board.hasMoreCompleted,
+    });
   } catch (error) {
     console.error('Erro ao listar agendamentos do admin:', error);
     return res.status(500).json({ error: 'Erro ao listar agendamentos.' });
+  }
+});
+
+adminRoutes.get('/bookings/calendar', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  if (tenant && workbenchStore.isEnabled()) {
+    try {
+      const registered = await workbenchStore.listTenants();
+      if (!registered.some((item) => item.slug === tenant && item.active)) {
+        return res.status(403).json({ error: 'Estabelecimento nao autorizado ou inativo.' });
+      }
+    } catch (error) {
+      console.error('Erro ao validar tenant no calendario:', error);
+      return res.status(500).json({ error: 'Erro ao validar estabelecimento.' });
+    }
+  }
+
+  const rawMonth = typeof req.query.month === 'string' ? req.query.month.trim() : '';
+  const rawStart = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
+  const rawEnd = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+
+  let startDate: string;
+  let endDate: string;
+
+  if (rawMonth) {
+    const bounds = getMonthBounds(rawMonth);
+    if (!bounds) {
+      return res.status(400).json({ error: 'Mes invalido. Use YYYY-MM.' });
+    }
+    startDate = bounds.startDate;
+    endDate = bounds.endDate;
+  } else {
+    if (!rawStart || !isValidIsoDate(rawStart)) {
+      return res.status(400).json({ error: 'Informe month=YYYY-MM ou startDate/endDate validos.' });
+    }
+    const resolvedEnd = rawEnd || rawStart;
+    if (!isValidIsoDate(resolvedEnd)) {
+      return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+    }
+    if (rawStart > resolvedEnd) {
+      return res.status(400).json({ error: 'A data inicial nao pode ser maior que a data final.' });
+    }
+    if (diffDaysIso(rawStart, resolvedEnd) > 62) {
+      return res.status(400).json({ error: 'Intervalo do calendario limitado a 62 dias por consulta.' });
+    }
+    startDate = rawStart;
+    endDate = resolvedEnd;
+  }
+
+  try {
+    const result = await bookingStore.listCalendarBookings({
+      startDate,
+      endDate,
+      tenantSlug: tenant,
+    });
+    return res.json(result);
+  } catch (error) {
+    console.error('Erro ao carregar calendario de agendamentos:', error);
+    return res.status(500).json({ error: 'Erro ao carregar calendario de agendamentos.' });
+  }
+});
+
+adminRoutes.get('/bookings/completed', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const rawPage = req.query.page !== undefined ? Number(req.query.page) : 1;
+  if (!Number.isFinite(rawPage) || rawPage < 1 || rawPage > 10_000) {
+    return res.status(400).json({ error: 'Parametro page invalido.' });
+  }
+
+  const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+  if (!Number.isFinite(rawLimit) || rawLimit < 1 || rawLimit > 50) {
+    return res.status(400).json({ error: 'Parametro limit deve estar entre 1 e 50.' });
+  }
+
+  const startDate = typeof req.query.startDate === 'string' && req.query.startDate.trim() ? req.query.startDate.trim() : null;
+  if (startDate && !DATE_REGEX.test(startDate)) {
+    return res.status(400).json({ error: 'Data inicial invalida. Use YYYY-MM-DD.' });
+  }
+
+  const endDate = typeof req.query.endDate === 'string' && req.query.endDate.trim() ? req.query.endDate.trim() : null;
+  if (endDate && !DATE_REGEX.test(endDate)) {
+    return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+  }
+
+  if (startDate && endDate && startDate > endDate) {
+    return res.status(400).json({ error: 'A data inicial nao pode ser maior que a data final.' });
+  }
+
+  const rawProf = typeof req.query.professionalId === 'string' ? req.query.professionalId.trim() : '';
+  let professionalId: number | 'unassigned' | null = null;
+  if (rawProf === 'unassigned') {
+    professionalId = 'unassigned';
+  } else if (rawProf) {
+    const parsedProf = Number(rawProf);
+    if (!Number.isFinite(parsedProf) || parsedProf <= 0) {
+      return res.status(400).json({ error: 'Filtro de colaborador invalido.' });
+    }
+    professionalId = Math.trunc(parsedProf);
+  }
+
+  const searchRaw = typeof req.query.search === 'string'
+    ? req.query.search
+    : typeof req.query.q === 'string'
+      ? req.query.q
+      : '';
+  const search = searchRaw.trim().slice(0, 120);
+  const cursor = typeof req.query.cursor === 'string' && req.query.cursor.trim() ? req.query.cursor.trim() : null;
+
+  try {
+    const pageResult = await bookingStore.listCompletedHistory({
+      tenantSlug: tenant,
+      search,
+      startDate,
+      endDate,
+      professionalId,
+      page: Math.trunc(rawPage),
+      limit: Math.trunc(rawLimit),
+      cursor,
+    });
+
+    return res.json(pageResult);
+  } catch (error) {
+    console.error('Erro ao listar historico de agendamentos finalizados:', error);
+    return res.status(500).json({ error: 'Erro ao listar historico de finalizados.' });
+  }
+});
+
+adminRoutes.get('/bookings/history', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const rawStatus = typeof req.query.status === 'string' ? req.query.status.trim().toLowerCase() : 'all';
+  const validStatuses = new Set(['all', 'pending', 'overdue', 'confirmed', 'completed']);
+  if (!validStatuses.has(rawStatus)) {
+    return res.status(400).json({ error: 'Filtro de status invalido.' });
+  }
+
+  const rawPage = req.query.page !== undefined ? Number(req.query.page) : 1;
+  if (!Number.isFinite(rawPage) || rawPage < 1 || rawPage > 10_000) {
+    return res.status(400).json({ error: 'Parametro page invalido.' });
+  }
+
+  const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 20;
+  if (!Number.isFinite(rawLimit) || rawLimit < 1 || rawLimit > 50) {
+    return res.status(400).json({ error: 'Parametro limit deve estar entre 1 e 50.' });
+  }
+
+  const startDate = typeof req.query.startDate === 'string' && req.query.startDate.trim() ? req.query.startDate.trim() : null;
+  if (startDate && !DATE_REGEX.test(startDate)) {
+    return res.status(400).json({ error: 'Data inicial invalida. Use YYYY-MM-DD.' });
+  }
+
+  const endDate = typeof req.query.endDate === 'string' && req.query.endDate.trim() ? req.query.endDate.trim() : null;
+  if (endDate && !DATE_REGEX.test(endDate)) {
+    return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+  }
+
+  if (startDate && endDate && startDate > endDate) {
+    return res.status(400).json({ error: 'A data inicial nao pode ser maior que a data final.' });
+  }
+
+  const rawProf = typeof req.query.professionalId === 'string' ? req.query.professionalId.trim() : '';
+  let professionalId: number | 'unassigned' | null = null;
+  if (rawProf === 'unassigned') {
+    professionalId = 'unassigned';
+  } else if (rawProf) {
+    const parsedProf = Number(rawProf);
+    if (!Number.isFinite(parsedProf) || parsedProf <= 0) {
+      return res.status(400).json({ error: 'Filtro de colaborador invalido.' });
+    }
+    professionalId = Math.trunc(parsedProf);
+  }
+
+  const searchRaw = typeof req.query.search === 'string'
+    ? req.query.search
+    : typeof req.query.q === 'string'
+      ? req.query.q
+      : '';
+  const search = searchRaw.trim().slice(0, 120);
+
+  try {
+    const pageResult = await bookingStore.listUnifiedHistory({
+      tenantSlug: tenant,
+      statusFilter: rawStatus as 'all' | 'pending' | 'overdue' | 'confirmed' | 'completed',
+      search,
+      startDate,
+      endDate,
+      professionalId,
+      page: Math.trunc(rawPage),
+      limit: Math.trunc(rawLimit),
+    });
+
+    return res.json(pageResult);
+  } catch (error) {
+    console.error('Erro ao listar historico unificado de agendamentos:', error);
+    return res.status(500).json({ error: 'Erro ao listar historico de agendamentos.' });
   }
 });
 
@@ -332,6 +595,11 @@ adminRoutes.post('/history/reset', async (req, res) => {
 });
 
 adminRoutes.post('/bookings', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   const { service, servicePrice, date, time, name, phone } = req.body || {};
   const serviceValue = typeof service === 'string' ? service.trim() : '';
   const servicePriceValue = typeof servicePrice === 'string' && servicePrice.trim() ? servicePrice.trim() : null;
@@ -361,6 +629,7 @@ adminRoutes.post('/bookings', async (req, res) => {
   try {
     const professionalSelection = await resolveProfessionalSelection(professionalId);
     const booking = await bookingStore.create({
+      tenantSlug: tenant || undefined,
       service: serviceValue,
       servicePrice: servicePriceValue,
       serviceItems,
@@ -386,6 +655,14 @@ adminRoutes.post('/bookings', async (req, res) => {
       booking: normalizedBooking,
     });
   } catch (error) {
+    const errObj = error as { code?: string; message?: string } | null;
+    if (
+      errObj?.code === '23505' ||
+      errObj?.code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+      (typeof errObj?.message === 'string' && /horario ja reservado|bookings_unique_active_slot_idx/i.test(errObj.message))
+    ) {
+      return res.status(409).json({ error: 'Horário já reservado.' });
+    }
     const message = error instanceof Error ? error.message : 'Erro ao criar agendamento administrativo.';
     console.error('Erro ao criar agendamento administrativo:', error);
     return res.status(500).json({ error: message });
@@ -489,14 +766,18 @@ adminRoutes.post('/bookings/:id/confirm', async (req, res) => {
         try {
           const amount = parseMoneyAmount(updatedBooking.servicePrice) || sumBookingServiceItems(updatedBooking.serviceItems);
 
-          await workbenchStore.create('finance', {
-            booking_id: updatedBooking.id,
-            client_name: updatedBooking.name,
-            service_name: updatedBooking.service,
-            amount,
-            status: 'pendente',
-            due_date: updatedBooking.date,
-          });
+          await workbenchStore.create(
+            'finance',
+            {
+              booking_id: updatedBooking.id,
+              client_name: updatedBooking.name,
+              service_name: updatedBooking.service,
+              amount,
+              status: 'pendente',
+              due_date: updatedBooking.date,
+            },
+            tenant || undefined,
+          );
         } catch (financeError) {
           console.error('Erro ao criar entrada financeira automatica:', financeError);
         }
@@ -534,6 +815,38 @@ adminRoutes.post('/bookings/:id/complete', async (req, res) => {
   }
 });
 
+adminRoutes.post('/bookings/:id/reopen', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const bookingId = parseBookingId(req.params.id);
+  if (!bookingId) {
+    return res.status(400).json({ error: 'ID de agendamento inválido.' });
+  }
+
+  try {
+    const booking = await bookingStore.getById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ error: 'Agendamento não encontrado.' });
+    }
+
+    const nextStatus = booking.professionalId && booking.professionalName ? 'confirmed' : 'pending';
+    const updatedBooking = await bookingStore.updateStatus({
+      id: booking.id,
+      status: nextStatus,
+      googleEventId: booking.googleEventId,
+      rejectionReason: null,
+    });
+
+    return res.json({ message: 'Agendamento reaberto com sucesso.', booking: updatedBooking });
+  } catch (error) {
+    console.error('Erro ao reabrir agendamento:', error);
+    return res.status(500).json({ error: 'Erro ao reabrir agendamento.' });
+  }
+});
+
 adminRoutes.get('/bookings/by-phone/:phone', async (req, res) => {
   const phone = req.params.phone?.trim();
   if (!phone) {
@@ -549,9 +862,14 @@ adminRoutes.get('/bookings/by-phone/:phone', async (req, res) => {
   }
 });
 
-adminRoutes.get('/bookings/pending-payment', async (_req, res) => {
+adminRoutes.get('/bookings/pending-payment', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
   try {
-    const bookings = await bookingStore.listPendingPayment();
+    const bookings = await bookingStore.listPendingPayment(tenant || undefined);
     return res.json({ bookings });
   } catch (error) {
     console.error('Erro ao listar agendamentos pendentes de pagamento:', error);
@@ -712,27 +1030,34 @@ adminRoutes.post('/bookings/:id/reschedule', async (req, res) => {
 
 adminRoutes.get('/inbox/conversations', async (_req, res) => {
   try {
-    const conversations = await inboxStore.listThreads();
+    const [conversations, allBookings] = await Promise.all([
+      inboxStore.listThreads(),
+      bookingStore.listAll().catch(() => [] as BookingRecord[]),
+    ]);
 
-    // Enrich with bookings + cached avatar (instant, no WhatsApp API calls)
-    const enrichedConversations = await Promise.all(
-      conversations.map(async (conversation) => {
-        let pendingBookingsCount = 0;
-        let latestBookingStatus: string | null = null;
-        try {
-          const linkedBookings = await bookingStore.listByWhatsappThread(conversation.id);
-          pendingBookingsCount = linkedBookings.filter((b) => b.status === 'pending').length;
-          latestBookingStatus = linkedBookings[0]?.status || null;
-        } catch { /* ignore */ }
+    const bookingsByThread = new Map<number, BookingRecord[]>();
+    for (const booking of allBookings) {
+      if (!booking.whatsappThreadId) continue;
+      const existing = bookingsByThread.get(booking.whatsappThreadId);
+      if (existing) {
+        existing.push(booking);
+      } else {
+        bookingsByThread.set(booking.whatsappThreadId, [booking]);
+      }
+    }
 
-        return {
-          ...conversation,
-          pendingBookingsCount,
-          latestBookingStatus,
-          avatarUrl: getWhatsappContactAvatarUrlCached(conversation.phone),
-        };
-      }),
-    );
+    const enrichedConversations = conversations.map((conversation) => {
+      const linkedBookings = bookingsByThread.get(conversation.id) || [];
+      const pendingBookingsCount = linkedBookings.filter((b) => b.status === 'pending').length;
+      const latestBookingStatus = linkedBookings[0]?.status || null;
+
+      return {
+        ...conversation,
+        pendingBookingsCount,
+        latestBookingStatus,
+        avatarUrl: getWhatsappContactAvatarUrlCached(conversation.phone),
+      };
+    });
 
     return res.json({ conversations: enrichedConversations });
   } catch (error) {
@@ -862,15 +1187,7 @@ adminRoutes.post('/inbox/conversations/:id/messages', whatsappSendRateLimit, asy
   }
 
   if (!whatsappConfig.isConfigured) {
-    return res.status(503).json({ error: 'WhatsApp (Baileys) não configurado.' });
-  }
-
-  const whatsappStatus = getWhatsappStatus();
-  if (!whatsappStatus.connected) {
-    return res.status(409).json({
-      error: 'WhatsApp desconectado. Conecte via QR Code antes de enviar mensagens.',
-      connectionState: whatsappStatus.connectionState,
-    });
+    return res.status(503).json({ error: 'Integração WhatsApp (Evolution API) não habilitada.' });
   }
 
   try {
@@ -879,13 +1196,11 @@ adminRoutes.post('/inbox/conversations/:id/messages', whatsappSendRateLimit, asy
       return res.status(404).json({ error: 'Conversa não encontrada.' });
     }
 
-    // Send via WhatsApp and respond immediately
-    const providerMessageId = await sendWhatsappMessageToCustomer(thread.phone, content);
+    const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+    const providerMessageId = await sendWhatsappMessageToCustomer(thread.phone, content, tenant);
 
-    // Respond to client right away — persist in background
     res.json({ message: 'Mensagem enviada com sucesso.' });
 
-    // Save to DB in background (non-blocking)
     void inboxStore.addMessage({
       threadId: thread.id,
       direction: 'outgoing',
@@ -896,65 +1211,68 @@ adminRoutes.post('/inbox/conversations/:id/messages', whatsappSendRateLimit, asy
   } catch (error) {
     console.error('Erro ao enviar mensagem do inbox:', error);
     if (!res.headersSent) {
-      return res.status(500).json({ error: 'Erro ao enviar mensagem do inbox.' });
+      const errMsg = error instanceof Error ? error.message : 'Erro ao enviar mensagem do inbox.';
+      return res.status(500).json({ error: errMsg });
     }
   }
 });
 
-adminRoutes.get('/whatsapp/status', (_req, res) => {
-  res.json(getWhatsappStatus());
+adminRoutes.get('/whatsapp/status', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+  const status = await syncWhatsappStatusFromEvolution(tenant, { includeQr: false });
+  res.json(status);
 });
 
-adminRoutes.post('/whatsapp/connect', whatsappControlRateLimit, async (_req, res) => {
+adminRoutes.post('/whatsapp/connect', whatsappControlRateLimit, async (req, res) => {
   if (!whatsappConfig.isConfigured) {
-    return res.status(503).json({ error: 'WhatsApp (Baileys) não habilitado.' });
+    return res.status(503).json({ error: 'Integração WhatsApp (Evolution API) não habilitada.' });
   }
 
   try {
-    await connectWhatsapp();
-    return res.json({ message: 'Conexão WhatsApp iniciada.', status: getWhatsappStatus() });
+    const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+    await connectWhatsapp(tenant);
+    return res.json({ message: 'Conexão WhatsApp (Evolution) iniciada.', status: getWhatsappStatus() });
   } catch (error) {
     console.error('Erro ao conectar WhatsApp:', error);
     return res.status(500).json({ error: 'Erro ao conectar WhatsApp.' });
   }
 });
 
-adminRoutes.post('/whatsapp/disconnect', whatsappControlRateLimit, async (_req, res) => {
+adminRoutes.post('/whatsapp/disconnect', whatsappControlRateLimit, async (req, res) => {
   try {
-    // Full logout to clear session and allow connecting a different number
-    await logoutWhatsapp();
-    try { await logoutEvolutionInstance(); } catch { /* ignore if not configured */ }
-    return res.json({ message: 'WhatsApp desconectado. Sessão encerrada.', status: getWhatsappStatus() });
+    const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+    await disconnectWhatsapp(tenant);
+    return res.json({ message: 'WhatsApp desconectado. Sessão encerrada na Evolution API.', status: getWhatsappStatus() });
   } catch (error) {
     console.error('Erro ao desconectar WhatsApp:', error);
     return res.status(500).json({ error: 'Erro ao desconectar WhatsApp.' });
   }
 });
 
-adminRoutes.post('/whatsapp/reconnect', whatsappControlRateLimit, async (_req, res) => {
+adminRoutes.post('/whatsapp/reconnect', whatsappControlRateLimit, async (req, res) => {
   if (!whatsappConfig.isConfigured) {
-    return res.status(503).json({ error: 'WhatsApp (Baileys) não habilitado.' });
+    return res.status(503).json({ error: 'Integração WhatsApp (Evolution API) não habilitada.' });
   }
 
   try {
-    await reconnectWhatsapp();
-    return res.json({ message: 'WhatsApp reconectado.', status: getWhatsappStatus() });
+    const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+    await reconnectWhatsapp(tenant);
+    return res.json({ message: 'WhatsApp reconectado via Evolution API.', status: getWhatsappStatus() });
   } catch (error) {
     console.error('Erro ao reconectar WhatsApp:', error);
     return res.status(500).json({ error: 'Erro ao reconectar WhatsApp.' });
   }
 });
 
-adminRoutes.post('/whatsapp/logout', whatsappControlRateLimit, async (_req, res) => {
+adminRoutes.post('/whatsapp/logout', whatsappControlRateLimit, async (req, res) => {
   if (!whatsappConfig.isConfigured) {
-    return res.status(503).json({ error: 'WhatsApp (Baileys) não habilitado.' });
+    return res.status(503).json({ error: 'Integração WhatsApp (Evolution API) não habilitada.' });
   }
 
   try {
-    await logoutWhatsapp();
-    // Also logout from Evolution API to fully clear the session
-    try { await logoutEvolutionInstance(); } catch { /* ignore if not configured */ }
-    return res.json({ message: 'Sessão encerrada. Escaneie o novo QR Code.', status: getWhatsappStatus() });
+    const tenant = parseTenantFromQuery(req.query.tenant) || undefined;
+    await logoutWhatsapp(tenant);
+    return res.json({ message: 'Sessão encerrada na Evolution API. Escaneie o novo QR Code.', status: getWhatsappStatus() });
   } catch (error) {
     console.error('Erro ao fazer logout WhatsApp:', error);
     return res.status(500).json({ error: 'Erro ao fazer logout do WhatsApp.' });

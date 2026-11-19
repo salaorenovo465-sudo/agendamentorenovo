@@ -1,9 +1,24 @@
+import crypto from 'crypto';
 import { Router } from 'express';
 
-import { workbenchStore, type WorkbenchEntity } from '../db/workbenchStore';
+import {
+  workbenchStore,
+  type WorkbenchEntity,
+  type ClientStatus,
+  type ClientFocusFilter,
+  type ClientSortMode,
+} from '../db/workbenchStore';
 import { bookingStore } from '../db/bookingStore';
+import { checkSupabaseReadiness } from '../db/supabaseReadiness';
+import { createRateLimit } from '../middleware/rateLimit';
 import { deleteCalendarEventById } from '../services/calendarService';
-import { runClientAgentRuleForTenant } from '../services/clientAgentService';
+import {
+  CLIENT_AGENT_EVENTS_KEY,
+  CLIENT_AGENT_RULES_KEY,
+  runClientAgentRuleForTenant,
+  sanitizeClientAgentEvents,
+  sanitizeClientAgentRules,
+} from '../services/clientAgentService';
 import {
   inspectEvolutionIntegration,
   sendEvolutionTestMessage,
@@ -12,6 +27,8 @@ import {
 import { getEvolutionInstanceStatus } from '../services/evolutionInstanceService';
 import type { BookingRecord } from '../types';
 import { getTodayDate, parseId } from '../utils/helpers';
+import { isValidIsoDate } from '../db/workbench/dashboardHelpers';
+import type { DashboardFinanceGroupBy, DashboardFinanceStatusFilter } from '../db/workbench/workbenchTypes';
 
 const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const TENANT_SLUG_REGEX = /^[a-z0-9][a-z0-9-]{1,48}$/;
@@ -28,238 +45,21 @@ const BASIC_PLATFORM_SETTINGS_KEYS = [
 
 const MASTER_PASSWORD_MIN_LENGTH = 4;
 const EVOLUTION_DEFAULT_SEND_PATH = '/message/sendText/{instance}';
-const CLIENT_AGENT_RULES_KEY = 'clientAgentRules';
-const CLIENT_AGENT_EVENTS_KEY = 'clientAgentEvents';
-const CLIENT_AGENT_MAX_EVENTS = 600;
-const ISO_DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
-const LOCAL_DATETIME_REGEX = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
-const ISO_INSTANT_REGEX = /^\d{4}-\d{2}-\d{2}T/;
-const CLIENT_AGENT_INTERVAL_UNITS = new Set(['days', 'weeks', 'months']);
-const CLIENT_AGENT_CHANNELS = new Set(['whatsapp', 'email', 'manual']);
 
-type ClientAgentIntervalUnit = 'days' | 'weeks' | 'months';
-type ClientAgentChannel = 'whatsapp' | 'email' | 'manual';
+const masterPasswordRateLimit = createRateLimit({
+  windowMs: 60_000,
+  max: 5,
+  message: 'Muitas tentativas de validacao de senha master. Aguarde 1 minuto.',
+  keyPrefix: 'master-password',
+});
 
-type ClientAgentRule = {
-  id: string;
-  clientId: number;
-  clientName: string;
-  serviceName: string;
-  intervalValue: number;
-  intervalUnit: ClientAgentIntervalUnit;
-  channel: ClientAgentChannel;
-  messageTemplate: string;
-  enabled: boolean;
-  referenceDate: string;
-  nextRunDate: string;
-  sendAt: string;
-  createdAt: string;
-  updatedAt: string;
-  lastExecutedAt: string | null;
-};
-
-type ClientAgentEvent = {
-  id: string;
-  ruleId: string;
-  clientId: number;
-  clientName: string;
-  serviceName: string;
-  channel: ClientAgentChannel;
-  scheduledFor: string;
-  messagePreview: string;
-  createdAt: string;
-  taskId: number | null;
-  status: 'queued' | 'sent' | 'failed' | 'skipped' | 'canceled';
-  reason: string | null;
-  sentAt: string | null;
-  providerMessageId: string | null;
-};
-
-const normalizeIsoDate = (value: unknown, fallback: string): string => {
-  if (typeof value !== 'string') {
-    return fallback;
+const safeEqualString = (left: string, right: string): boolean => {
+  const leftBuf = Buffer.from(left, 'utf8');
+  const rightBuf = Buffer.from(right, 'utf8');
+  if (leftBuf.length !== rightBuf.length || leftBuf.length === 0) {
+    return false;
   }
-  const normalized = value.trim();
-  return ISO_DATE_REGEX.test(normalized) ? normalized : fallback;
-};
-
-const normalizeIsoInstant = (value: unknown, fallback: string): string => {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-  const normalized = value.trim();
-  return ISO_INSTANT_REGEX.test(normalized) ? normalized : fallback;
-};
-
-const normalizeLocalDateTime = (value: unknown, fallback: string): string => {
-  if (typeof value !== 'string') {
-    return fallback;
-  }
-
-  const normalized = value.trim();
-  return LOCAL_DATETIME_REGEX.test(normalized) ? normalized : fallback;
-};
-
-const sanitizeClientAgentRules = (value: unknown): ClientAgentRule[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const nowIso = new Date().toISOString();
-  const today = getTodayDate();
-  const sanitized: ClientAgentRule[] = [];
-  const seen = new Set<string>();
-
-  for (const item of value) {
-    if (!item || typeof item !== 'object') {
-      continue;
-    }
-
-    const row = item as Record<string, unknown>;
-    const idRaw = typeof row.id === 'string' ? row.id.trim() : '';
-    if (!idRaw || seen.has(idRaw)) {
-      continue;
-    }
-
-    const clientId = Number(row.clientId || 0);
-    const clientName = typeof row.clientName === 'string' ? row.clientName.trim() : '';
-    const serviceName = typeof row.serviceName === 'string' ? row.serviceName.trim() : '';
-    const intervalValue = Math.max(1, Math.min(36, Number(row.intervalValue || 0)));
-    const intervalUnit = typeof row.intervalUnit === 'string' && CLIENT_AGENT_INTERVAL_UNITS.has(row.intervalUnit)
-      ? (row.intervalUnit as ClientAgentIntervalUnit)
-      : 'months';
-    const channel = typeof row.channel === 'string' && CLIENT_AGENT_CHANNELS.has(row.channel)
-      ? (row.channel as ClientAgentChannel)
-      : 'manual';
-    const messageTemplate = typeof row.messageTemplate === 'string' && row.messageTemplate.trim()
-      ? row.messageTemplate.trim()
-      : [
-        '\u2728 *LEMBRETE DE RETORNO* \u2728',
-        '',
-        'Ola, *{cliente}*! \u{1F496}',
-        'Estamos entrando em contato pelo *Estudio Renovo* para lembrar do seu retorno. \u{1F338}',
-        '',
-        '\u{1F451} *SERVICO:*',
-        '{servico}',
-        '',
-        '\u{1F4C5} *DATA SUGERIDA:* {data_proxima}',
-        '',
-        'Se quiser, responda esta mensagem para organizarmos seu proximo horario. \u{1F4AC}\u2728',
-        'Sera um prazer receber voce novamente! \u{1F495}',
-      ].join('\n');
-    const enabled = row.enabled !== false;
-
-    if (!Number.isFinite(clientId) || clientId <= 0 || !clientName || !serviceName || !Number.isFinite(intervalValue)) {
-      continue;
-    }
-
-    const referenceDate = normalizeIsoDate(row.referenceDate, today);
-    const nextRunDate = normalizeIsoDate(row.nextRunDate, today);
-    const sendAt = normalizeLocalDateTime(row.sendAt, `${nextRunDate}T09:00`);
-    const createdAt = normalizeIsoInstant(row.createdAt, nowIso);
-    const updatedAt = normalizeIsoInstant(row.updatedAt, nowIso);
-    const lastExecutedAt = row.lastExecutedAt === null
-      ? null
-      : normalizeIsoInstant(row.lastExecutedAt, '');
-
-    sanitized.push({
-      id: idRaw,
-      clientId,
-      clientName,
-      serviceName,
-      intervalValue,
-      intervalUnit,
-      channel,
-      messageTemplate,
-      enabled,
-      referenceDate,
-      nextRunDate,
-      sendAt,
-      createdAt,
-      updatedAt,
-      lastExecutedAt: lastExecutedAt || null,
-    });
-    seen.add(idRaw);
-  }
-
-  return sanitized;
-};
-
-const sanitizeClientAgentEvents = (value: unknown): ClientAgentEvent[] => {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const nowIso = new Date().toISOString();
-  const today = getTodayDate();
-  const sanitized: ClientAgentEvent[] = [];
-  const seen = new Set<string>();
-
-  for (const item of value) {
-    if (!item || typeof item !== 'object') {
-      continue;
-    }
-
-    const row = item as Record<string, unknown>;
-    const idRaw = typeof row.id === 'string' ? row.id.trim() : '';
-    if (!idRaw || seen.has(idRaw)) {
-      continue;
-    }
-
-    const ruleId = typeof row.ruleId === 'string' ? row.ruleId.trim() : '';
-    const clientId = Number(row.clientId || 0);
-    const clientName = typeof row.clientName === 'string' ? row.clientName.trim() : '';
-    const serviceName = typeof row.serviceName === 'string' ? row.serviceName.trim() : '';
-    const channel = typeof row.channel === 'string' && CLIENT_AGENT_CHANNELS.has(row.channel)
-      ? (row.channel as ClientAgentChannel)
-      : 'manual';
-    const scheduledFor = normalizeLocalDateTime(row.scheduledFor, `${normalizeIsoDate(row.scheduledFor, today)}T09:00`);
-    const messagePreview = typeof row.messagePreview === 'string' ? row.messagePreview.trim() : '';
-    const createdAt = normalizeIsoInstant(row.createdAt, nowIso);
-    const status = row.status === 'sent'
-      ? 'sent'
-      : row.status === 'failed'
-        ? 'failed'
-        : row.status === 'skipped'
-          ? 'skipped'
-          : row.status === 'canceled'
-            ? 'canceled'
-            : 'queued';
-    const reason = typeof row.reason === 'string' && row.reason.trim() ? row.reason.trim() : null;
-    const taskId = Number(row.taskId || 0);
-    const sentAt = row.sentAt === null
-      ? null
-      : normalizeIsoInstant(row.sentAt, '');
-    const providerMessageId = typeof row.providerMessageId === 'string' && row.providerMessageId.trim()
-      ? row.providerMessageId.trim()
-      : null;
-
-    if (!ruleId || !Number.isFinite(clientId) || clientId <= 0 || !clientName || !serviceName) {
-      continue;
-    }
-
-    sanitized.push({
-      id: idRaw,
-      ruleId,
-      clientId,
-      clientName,
-      serviceName,
-      channel,
-      scheduledFor,
-      messagePreview,
-      createdAt,
-      taskId: Number.isFinite(taskId) && taskId > 0 ? taskId : null,
-      status,
-      reason,
-      sentAt: sentAt || null,
-      providerMessageId,
-    });
-    seen.add(idRaw);
-  }
-
-  return sanitized
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, CLIENT_AGENT_MAX_EVENTS);
+  return crypto.timingSafeEqual(leftBuf, rightBuf);
 };
 
 const pickBasicPlatformSettings = (value: Record<string, unknown>): Record<string, unknown> => {
@@ -302,13 +102,21 @@ const normalizeUrlSetting = (value: string): string => {
 };
 
 const pickEvolutionIntegrationSettings = (settings: Record<string, unknown>) => {
-  const evolutionUrl = typeof settings.evolutionUrl === 'string' ? settings.evolutionUrl.trim() : '';
-  const evolutionApiKey = typeof settings.evolutionApiKey === 'string' ? settings.evolutionApiKey.trim() : '';
-  const evolutionInstance = typeof settings.evolutionInstance === 'string' ? settings.evolutionInstance.trim() : '';
+  const evolutionUrl = (typeof settings.evolutionUrl === 'string' && settings.evolutionUrl.trim())
+    ? settings.evolutionUrl.trim()
+    : (process.env.EVOLUTION_URL || '').trim();
+  const evolutionApiKey = (typeof settings.evolutionApiKey === 'string' && settings.evolutionApiKey.trim())
+    ? settings.evolutionApiKey.trim()
+    : (process.env.EVOLUTION_API_KEY || '').trim();
+  const evolutionInstance = (typeof settings.evolutionInstance === 'string' && settings.evolutionInstance.trim())
+    ? settings.evolutionInstance.trim()
+    : (process.env.EVOLUTION_INSTANCE || '').trim();
   const evolutionSendPath = typeof settings.evolutionSendPath === 'string' && settings.evolutionSendPath.trim()
     ? settings.evolutionSendPath.trim()
     : EVOLUTION_DEFAULT_SEND_PATH;
-  const evolutionWebhookSecret = typeof settings.evolutionWebhookSecret === 'string' ? settings.evolutionWebhookSecret.trim() : '';
+  const evolutionWebhookSecret = (typeof settings.evolutionWebhookSecret === 'string' && settings.evolutionWebhookSecret.trim())
+    ? settings.evolutionWebhookSecret.trim()
+    : (process.env.EVOLUTION_WEBHOOK_SECRET || '').trim();
 
   return {
     provider: 'evolution' as const,
@@ -395,10 +203,8 @@ const resolveRequestPublicBaseUrl = (req: {
 const getPayloadString = (payload: Record<string, unknown>, key: string): string =>
   typeof payload[key] === 'string' ? payload[key].trim() : '';
 
-const getRequestFallbackMasterPassword = (req: { headers: Record<string, unknown> }): string => {
-  const adminHeader = req.headers['x-admin-key'];
-  const adminKey = Array.isArray(adminHeader) ? adminHeader[0] : adminHeader;
-  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || (typeof adminKey === 'string' ? adminKey.trim() : '');
+const getRequestFallbackMasterPassword = (_req: { headers: Record<string, unknown> }): string => {
+  return process.env.ADMIN_MASTER_PASSWORD || process.env.WHATSAPP_MASTER_PASSWORD || '';
 };
 
 const resolveMasterPassword = (settings: Record<string, unknown>, fallbackPassword: string): string => {
@@ -429,18 +235,67 @@ const isValidEntity = (value: string): value is WorkbenchEntity => ENTITIES.incl
 
 export const adminWorkbenchRoutes = Router();
 
+const ensureKnownTenant = async (rawTenant: unknown): Promise<{ ok: true; tenant: string | null } | { ok: false; status: number; error: string }> => {
+  if (rawTenant === undefined || rawTenant === null || String(rawTenant).trim() === '') {
+    return { ok: true, tenant: null };
+  }
+  const parsed = parseTenantFromQuery(rawTenant);
+  if (!parsed) {
+    return { ok: false, status: 400, error: 'Slug de tenant invalido.' };
+  }
+
+  try {
+    const tenants = await workbenchStore.listTenants();
+    if (!tenants.some((item) => item.slug === parsed && item.active)) {
+      return { ok: false, status: 403, error: 'Estabelecimento não autorizado ou inativo.' };
+    }
+  } catch (error) {
+    if (!isWorkbenchUnavailable(error)) {
+      throw error;
+    }
+  }
+
+  return { ok: true, tenant: parsed };
+};
+
 adminWorkbenchRoutes.get('/overview', async (req, res) => {
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch((err) => {
+    console.error('Erro ao validar tenant em overview:', err);
+    return { ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' };
+  });
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   const scope = req.query.scope === 'all' ? 'all' : 'range';
-  const startDate = typeof req.query.date === 'string' && DATE_REGEX.test(req.query.date) ? req.query.date : getTodayDate();
-  const endDate = typeof req.query.endDate === 'string' && DATE_REGEX.test(req.query.endDate) ? req.query.endDate : null;
+  const rawStartDate = typeof req.query.date === 'string'
+    ? req.query.date.trim()
+    : typeof req.query.startDate === 'string'
+      ? req.query.startDate.trim()
+      : '';
+  if (scope === 'range' && rawStartDate && (!DATE_REGEX.test(rawStartDate) || !isValidIsoDate(rawStartDate))) {
+    return res.status(400).json({ error: 'Data inicial invalida. Use YYYY-MM-DD.' });
+  }
+
+  const rawEndDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+  if (scope === 'range' && rawEndDate && (!DATE_REGEX.test(rawEndDate) || !isValidIsoDate(rawEndDate))) {
+    return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+  }
+
+  const startDate = rawStartDate || getTodayDate();
+  const endDate = rawEndDate || startDate;
+  if (scope === 'range' && startDate > endDate) {
+    return res.status(400).json({ error: 'A data inicial nao pode ser maior que a data final.' });
+  }
 
   try {
     const overview = await workbenchStore.getOverview(
       scope === 'all'
-        ? undefined
+        ? { tenantSlug: tenantCheck.tenant || undefined }
         : {
             startDate,
-            endDate: endDate || startDate,
+            endDate,
+            tenantSlug: tenantCheck.tenant || undefined,
           },
     );
     return res.json(overview);
@@ -450,6 +305,102 @@ adminWorkbenchRoutes.get('/overview', async (req, res) => {
       return res.status(503).json({ error: (error as Error).message });
     }
     return res.status(500).json({ error: 'Erro ao carregar overview.' });
+  }
+});
+
+adminWorkbenchRoutes.get('/supabase/status', async (req, res) => {
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch((err) => {
+    console.error('Erro ao validar tenant em supabase/status:', err);
+    return { ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' };
+  });
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
+  try {
+    const report = workbenchStore.isEnabled()
+      ? await workbenchStore.checkSupabaseHealth(tenantCheck.tenant || undefined)
+      : await checkSupabaseReadiness(null, tenantCheck.tenant || undefined);
+    return res.json(report);
+  } catch (error) {
+    console.error('Erro ao verificar status do Supabase:', error);
+    return res.status(500).json({ error: 'Erro ao diagnosticar vínculo com Supabase.' });
+  }
+});
+
+adminWorkbenchRoutes.get('/dashboard/finance', async (req, res) => {
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch((err) => {
+    console.error('Erro ao validar tenant em dashboard/finance:', err);
+    return { ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' };
+  });
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
+  const scope = req.query.scope === 'all' ? 'all' : 'range';
+  const rawStartDate = typeof req.query.date === 'string'
+    ? req.query.date.trim()
+    : typeof req.query.startDate === 'string'
+      ? req.query.startDate.trim()
+      : '';
+  if (scope === 'range' && rawStartDate && (!DATE_REGEX.test(rawStartDate) || !isValidIsoDate(rawStartDate))) {
+    return res.status(400).json({ error: 'Data inicial invalida. Use YYYY-MM-DD.' });
+  }
+
+  const rawEndDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
+  if (scope === 'range' && rawEndDate && (!DATE_REGEX.test(rawEndDate) || !isValidIsoDate(rawEndDate))) {
+    return res.status(400).json({ error: 'Data final invalida. Use YYYY-MM-DD.' });
+  }
+
+  const startDate = scope === 'range' ? (rawStartDate || getTodayDate()) : null;
+  const endDate = scope === 'range' ? (rawEndDate || startDate) : null;
+  if (scope === 'range' && startDate && endDate && startDate > endDate) {
+    return res.status(400).json({ error: 'A data inicial nao pode ser maior que a data final.' });
+  }
+
+  const rawGroupBy = typeof req.query.groupBy === 'string' ? req.query.groupBy.trim().toLowerCase() : 'auto';
+  const validGroupBy = new Set(['auto', 'day', 'week', 'month']);
+  if (!validGroupBy.has(rawGroupBy)) {
+    return res.status(400).json({ error: 'Agrupamento invalido. Use auto, day, week ou month.' });
+  }
+
+  const rawPage = req.query.page !== undefined ? Number(req.query.page) : 1;
+  if (!Number.isFinite(rawPage) || rawPage < 1 || rawPage > 10_000) {
+    return res.status(400).json({ error: 'Parametro page invalido.' });
+  }
+
+  const rawLimit = req.query.limit !== undefined ? Number(req.query.limit) : 10;
+  if (!Number.isFinite(rawLimit) || rawLimit < 1 || rawLimit > 50) {
+    return res.status(400).json({ error: 'Parametro limit deve estar entre 1 e 50.' });
+  }
+
+  const rawEntryStatus = typeof req.query.entryStatus === 'string' ? req.query.entryStatus.trim().toLowerCase() : 'all';
+  const validEntryStatuses = new Set(['all', 'pago', 'pendente']);
+  if (!validEntryStatuses.has(rawEntryStatus)) {
+    return res.status(400).json({ error: 'Parametro entryStatus invalido. Use all, pago ou pendente.' });
+  }
+
+  const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim().slice(0, 100) : '';
+
+  try {
+    const financeData = await workbenchStore.getDashboardFinance({
+      scope,
+      startDate,
+      endDate,
+      groupBy: rawGroupBy as DashboardFinanceGroupBy | 'auto',
+      tenantSlug: tenantCheck.tenant || undefined,
+      entryStatus: rawEntryStatus as DashboardFinanceStatusFilter,
+      search: rawSearch,
+      page: Math.trunc(rawPage),
+      limit: Math.trunc(rawLimit),
+    });
+    return res.json(financeData);
+  } catch (error) {
+    console.error('Erro ao carregar painel financeiro da dashboard:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao carregar dados financeiros da dashboard.' });
   }
 });
 
@@ -472,7 +423,7 @@ adminWorkbenchRoutes.get('/settings', async (req, res) => {
   }
 });
 
-adminWorkbenchRoutes.post('/settings/master-password/verify', async (req, res) => {
+adminWorkbenchRoutes.post('/settings/master-password/verify', masterPasswordRateLimit, async (req, res) => {
   const tenant = parseTenantFromQuery(req.query.tenant);
 
   if (typeof req.query.tenant === 'string' && !tenant) {
@@ -491,7 +442,8 @@ adminWorkbenchRoutes.post('/settings/master-password/verify', async (req, res) =
 
   try {
     const settings = await workbenchStore.getSettings(tenant || undefined);
-    return res.json({ ok: password === resolveMasterPassword(settings, getRequestFallbackMasterPassword(req)) });
+    const expectedMaster = resolveMasterPassword(settings, getRequestFallbackMasterPassword(req));
+    return res.json({ ok: Boolean(expectedMaster) && safeEqualString(password, expectedMaster) });
   } catch (error) {
     console.error('Erro ao validar senha master:', error);
     if (isWorkbenchUnavailable(error)) {
@@ -501,7 +453,7 @@ adminWorkbenchRoutes.post('/settings/master-password/verify', async (req, res) =
   }
 });
 
-adminWorkbenchRoutes.put('/settings/master-password', async (req, res) => {
+adminWorkbenchRoutes.put('/settings/master-password', masterPasswordRateLimit, async (req, res) => {
   const tenant = parseTenantFromQuery(req.query.tenant);
 
   if (typeof req.query.tenant === 'string' && !tenant) {
@@ -526,7 +478,11 @@ adminWorkbenchRoutes.put('/settings/master-password', async (req, res) => {
 
   try {
     const current = await workbenchStore.getSettings(tenant || undefined);
-    if (currentPassword !== resolveMasterPassword(current, getRequestFallbackMasterPassword(req))) {
+    const expectedMaster = resolveMasterPassword(current, getRequestFallbackMasterPassword(req));
+    if (!expectedMaster) {
+      return res.status(500).json({ error: 'Senha master não configurada. Defina ADMIN_MASTER_PASSWORD no servidor.' });
+    }
+    if (!safeEqualString(currentPassword, expectedMaster)) {
       return res.status(403).json({ error: 'Senha master atual invalida.' });
     }
 
@@ -588,7 +544,7 @@ adminWorkbenchRoutes.get('/settings/integrations/evolution', async (req, res) =>
   }
 
   try {
-    const settings = await workbenchStore.getSettings(tenant || undefined);
+    const settings = await workbenchStore.getSettings(tenant || undefined).catch(() => ({} as Record<string, unknown>));
     const status = await getEvolutionInstanceStatus(tenant || undefined, { includeQr: false });
     const effectiveSettings = status.exists && status.instanceName
       ? { ...settings, evolutionInstance: status.instanceName }
@@ -695,7 +651,7 @@ adminWorkbenchRoutes.post('/settings/integrations/evolution/test', async (req, r
 
   try {
     const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
-    const current = await workbenchStore.getSettings(tenant || undefined);
+    const current = await workbenchStore.getSettings(tenant || undefined).catch(() => ({} as Record<string, unknown>));
 
     const testSettings: Record<string, unknown> = {
       ...current,
@@ -748,7 +704,7 @@ adminWorkbenchRoutes.post('/settings/integrations/evolution/test-message', async
   }
 
   try {
-    const current = await workbenchStore.getSettings(tenant || undefined);
+    const current = await workbenchStore.getSettings(tenant || undefined).catch(() => ({} as Record<string, unknown>));
     const settingsOverride: Record<string, unknown> = {
       ...current,
       evolutionUrl: normalizeUrlSetting(getPayloadString(settingsPayload, 'evolutionUrl')) || current.evolutionUrl,
@@ -940,8 +896,13 @@ adminWorkbenchRoutes.post('/leads/:id/convert', async (req, res) => {
     return res.status(400).json({ error: 'ID de lead inválido.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   try {
-    const result = await workbenchStore.convertLeadToClient(leadId);
+    const result = await workbenchStore.convertLeadToClient(leadId, tenantCheck.tenant || undefined);
     return res.json({
       message: 'Lead convertido em cliente com sucesso.',
       lead: result.lead,
@@ -962,10 +923,15 @@ adminWorkbenchRoutes.post('/finance/:id/pay', async (req, res) => {
     return res.status(400).json({ error: 'ID financeiro inválido.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   const paymentMethod = typeof req.body?.payment_method === 'string' ? req.body.payment_method.trim() : undefined;
 
   try {
-    const entry = await workbenchStore.markFinancePaid(financeId, paymentMethod);
+    const entry = await workbenchStore.markFinancePaid(financeId, paymentMethod, tenantCheck.tenant || undefined);
     return res.json({ message: 'Pagamento marcado como pago.', entry });
   } catch (error) {
     console.error('Erro ao marcar pagamento:', error);
@@ -976,14 +942,72 @@ adminWorkbenchRoutes.post('/finance/:id/pay', async (req, res) => {
   }
 });
 
+adminWorkbenchRoutes.get('/clients/workspace', async (req, res) => {
+  const tenant = parseTenantFromQuery(req.query.tenant);
+  if (typeof req.query.tenant === 'string' && !tenant) {
+    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  }
+
+  const mode = req.query.mode === 'directory' ? 'directory' : 'kanban';
+  const search = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+  const statusRaw = typeof req.query.status === 'string' ? req.query.status.trim() : 'todos';
+  const focusRaw = typeof req.query.focus === 'string' ? req.query.focus.trim() : 'todos';
+  const sortRaw = typeof req.query.sort === 'string' ? req.query.sort.trim() : 'proximo-aviso';
+  const columnLimit = typeof req.query.columnLimit === 'string' ? Number(req.query.columnLimit) : 20;
+  const page = typeof req.query.page === 'string' ? Number(req.query.page) : 1;
+  const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 20;
+
+  let columnLimits: Partial<Record<ClientStatus, number>> | undefined;
+  if (typeof req.query.columnLimits === 'string' && req.query.columnLimits.trim()) {
+    try {
+      const parsed = JSON.parse(req.query.columnLimits);
+      if (parsed && typeof parsed === 'object') {
+        columnLimits = parsed as Partial<Record<ClientStatus, number>>;
+      }
+    } catch {
+      // ignore invalid JSON
+    }
+  }
+
+  try {
+    if (req.query.refresh === '1') {
+      workbenchStore.invalidateClientsWorkspaceCache();
+    }
+    const workspace = await workbenchStore.getClientsWorkspace({
+      tenantSlug: tenant || undefined,
+      mode,
+      search,
+      status: statusRaw as 'todos' | ClientStatus,
+      focus: focusRaw as ClientFocusFilter,
+      sort: sortRaw as ClientSortMode,
+      columnLimit: Number.isFinite(columnLimit) ? columnLimit : 20,
+      columnLimits,
+      page: Number.isFinite(page) ? page : 1,
+      limit: Number.isFinite(limit) ? limit : 20,
+    });
+    return res.json(workspace);
+  } catch (error) {
+    console.error('Erro ao carregar workspace de clientes:', error);
+    if (isWorkbenchUnavailable(error)) {
+      return res.status(503).json({ error: (error as Error).message });
+    }
+    return res.status(500).json({ error: 'Erro ao carregar carteira de clientes.' });
+  }
+});
+
 adminWorkbenchRoutes.get('/clients/by-phone/:phone', async (req, res) => {
   const phone = req.params.phone?.trim();
   if (!phone) {
     return res.status(400).json({ error: 'Telefone é obrigatório.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   try {
-    const client = await workbenchStore.findClientByPhone(phone);
+    const client = await workbenchStore.findClientByPhone(phone, tenantCheck.tenant || undefined);
     return res.json({ client });
   } catch (error) {
     console.error('Erro ao buscar cliente por telefone:', error);
@@ -995,12 +1019,20 @@ adminWorkbenchRoutes.get('/clients/by-phone/:phone', async (req, res) => {
 });
 
 adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
-  const date = typeof req.body?.date === 'string' && DATE_REGEX.test(req.body.date) ? req.body.date : undefined;
-  const tenant = parseTenantFromQuery(req.query.tenant);
-
-  if (typeof req.query.tenant === 'string' && !tenant) {
-    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  const rawDate = typeof req.body?.date === 'string' ? req.body.date.trim() : '';
+  if (rawDate && (!DATE_REGEX.test(rawDate) || !isValidIsoDate(rawDate))) {
+    return res.status(400).json({ error: 'Data invalida para zerar financeiro. Use YYYY-MM-DD.' });
   }
+  const date = rawDate || undefined;
+
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch((err) => {
+    console.error('Erro ao validar tenant em finance/reset:', err);
+    return { ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' };
+  });
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+  const tenant = tenantCheck.tenant;
 
   try {
     const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
@@ -1011,19 +1043,25 @@ adminWorkbenchRoutes.post('/finance/reset', async (req, res) => {
     }
 
     const settings = await workbenchStore.getSettings(tenant || undefined);
-    if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+    const expectedMaster = resolveMasterPassword(settings, getRequestFallbackMasterPassword(req));
+    if (!expectedMaster) {
+      return res.status(500).json({ error: 'Senha master não configurada. Defina ADMIN_MASTER_PASSWORD no servidor.' });
+    }
+    if (!safeEqualString(masterPassword, expectedMaster)) {
       return res.status(403).json({ error: 'Senha master invalida.' });
     }
 
-    const deleted = await workbenchStore.resetFinance(date);
+    const deleted = await workbenchStore.resetFinance(date, tenant || undefined);
     let bookingsReset = 0;
     if (!date) {
-      bookingsReset = await bookingStore.resetAllPaymentStatuses();
+      bookingsReset = await bookingStore.resetAllPaymentStatuses(tenant || undefined);
     }
     return res.json({
-      message: `${deleted} entradas financeiras removidas.`,
+      message: `${deleted} lançamento(s) financeiro(s) removido(s).`,
       deleted,
       bookingsReset,
+      scope: date ? 'date' : 'all',
+      date: date || null,
     });
   } catch (error) {
     console.error('Erro ao zerar financeiro:', error);
@@ -1050,7 +1088,11 @@ adminWorkbenchRoutes.post('/history/reset', async (req, res) => {
     }
 
     const settings = await workbenchStore.getSettings(tenant || undefined);
-    if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+    const expectedMaster = resolveMasterPassword(settings, getRequestFallbackMasterPassword(req));
+    if (!expectedMaster) {
+      return res.status(500).json({ error: 'Senha master não configurada. Defina ADMIN_MASTER_PASSWORD no servidor.' });
+    }
+    if (!safeEqualString(masterPassword, expectedMaster)) {
       return res.status(403).json({ error: 'Senha master invalida.' });
     }
 
@@ -1084,6 +1126,11 @@ adminWorkbenchRoutes.post('/history/reset', async (req, res) => {
 });
 
 adminWorkbenchRoutes.post('/finance/confirm-booking-payment', async (req, res) => {
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   const bookingId = typeof req.body?.booking_id === 'number' ? req.body.booking_id : null;
   const paymentMethod = typeof req.body?.payment_method === 'string' ? req.body.payment_method.trim() : null;
 
@@ -1097,7 +1144,7 @@ adminWorkbenchRoutes.post('/finance/confirm-booking-payment', async (req, res) =
   }
 
   try {
-    const entry = await workbenchStore.confirmBookingPayment(bookingId, paymentMethod);
+    const entry = await workbenchStore.confirmBookingPayment(bookingId, paymentMethod, tenantCheck.tenant || undefined);
     return res.json({ message: 'Pagamento confirmado com sucesso.', entry });
   } catch (error) {
     console.error('Erro ao confirmar pagamento do agendamento:', error);
@@ -1115,8 +1162,13 @@ adminWorkbenchRoutes.get('/:entity', async (req, res) => {
     return res.status(404).json({ error: 'Entidade não suportada.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   try {
-    const rows = await workbenchStore.list(entity);
+    const rows = await workbenchStore.list(entity, tenantCheck.tenant || undefined);
     return res.json({ rows });
   } catch (error) {
     console.error(`Erro ao listar entidade ${entity}:`, error);
@@ -1133,13 +1185,18 @@ adminWorkbenchRoutes.post('/:entity', async (req, res) => {
     return res.status(404).json({ error: 'Entidade não suportada.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
   if (!payload) {
     return res.status(400).json({ error: 'Payload inválido.' });
   }
 
   try {
-    const row = await workbenchStore.create(entity, payload);
+    const row = await workbenchStore.create(entity, payload, tenantCheck.tenant || undefined);
     return res.status(201).json({ row });
   } catch (error) {
     console.error(`Erro ao criar registro ${entity}:`, error);
@@ -1161,13 +1218,18 @@ adminWorkbenchRoutes.patch('/:entity/:id', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido.' });
   }
 
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
+  }
+
   const payload = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : null;
   if (!payload) {
     return res.status(400).json({ error: 'Payload inválido.' });
   }
 
   try {
-    const row = await workbenchStore.update(entity, id, payload);
+    const row = await workbenchStore.update(entity, id, payload, tenantCheck.tenant || undefined);
     return res.json({ row });
   } catch (error) {
     console.error(`Erro ao atualizar registro ${entity}:`, error);
@@ -1189,10 +1251,11 @@ adminWorkbenchRoutes.delete('/:entity/:id', async (req, res) => {
     return res.status(400).json({ error: 'ID inválido.' });
   }
 
-  const tenant = parseTenantFromQuery(req.query.tenant);
-  if (typeof req.query.tenant === 'string' && !tenant) {
-    return res.status(400).json({ error: 'Slug de tenant invalido.' });
+  const tenantCheck = await ensureKnownTenant(req.query.tenant).catch(() => ({ ok: false as const, status: 500, error: 'Erro ao validar estabelecimento.' }));
+  if (tenantCheck.ok === false) {
+    return res.status(tenantCheck.status).json({ error: tenantCheck.error });
   }
+  const tenant = tenantCheck.tenant;
 
   try {
     if (SENSITIVE_DELETE_ENTITIES.has(entity)) {
@@ -1204,12 +1267,16 @@ adminWorkbenchRoutes.delete('/:entity/:id', async (req, res) => {
       }
 
       const settings = await workbenchStore.getSettings(tenant || undefined);
-      if (masterPassword !== resolveMasterPassword(settings, getRequestFallbackMasterPassword(req))) {
+      const expectedMaster = resolveMasterPassword(settings, getRequestFallbackMasterPassword(req));
+      if (!expectedMaster) {
+        return res.status(500).json({ error: 'Senha master não configurada. Defina ADMIN_MASTER_PASSWORD no servidor.' });
+      }
+      if (!safeEqualString(masterPassword, expectedMaster)) {
         return res.status(403).json({ error: 'Senha master invalida.' });
       }
     }
 
-    await workbenchStore.remove(entity, id);
+    await workbenchStore.remove(entity, id, tenant || undefined);
     return res.json({ message: 'Registro removido com sucesso.' });
   } catch (error) {
     console.error(`Erro ao remover registro ${entity}:`, error);

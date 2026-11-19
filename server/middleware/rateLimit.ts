@@ -58,15 +58,6 @@ if (typeof sweepTimer.unref === 'function') {
 import { toPositiveInt } from '../utils/helpers';
 
 const getRequesterId = (req: Request): string => {
-  const forwardedFor = req.headers['x-forwarded-for'];
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    return forwardedFor.split(',')[0]?.trim() || 'unknown';
-  }
-
-  if (Array.isArray(forwardedFor) && forwardedFor[0]) {
-    return forwardedFor[0];
-  }
-
   return req.ip || req.socket.remoteAddress || 'unknown';
 };
 

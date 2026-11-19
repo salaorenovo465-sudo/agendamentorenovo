@@ -1,5 +1,6 @@
 create table if not exists public.bookings (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   service text not null,
   service_price text,
   service_items jsonb not null default '[]'::jsonb,
@@ -10,11 +11,13 @@ create table if not exists public.bookings (
   professional_id bigint,
   professional_name text,
   status text not null default 'pending' check (status in ('pending', 'confirmed', 'rejected', 'completed')),
+  payment_status text not null default 'pendente',
   google_event_id text,
   whatsapp_thread_id bigint,
   rejection_reason text,
   confirmed_at timestamptz,
   rejected_at timestamptz,
+  completed_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -41,6 +44,7 @@ create table if not exists public.whatsapp_messages (
 
 create table if not exists public.availability_rules (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   title text not null,
   type text not null default 'horario',
   weekday integer,
@@ -54,6 +58,7 @@ create table if not exists public.availability_rules (
 
 create table if not exists public.clients (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   name text not null,
   phone text not null,
   email text,
@@ -69,6 +74,7 @@ create table if not exists public.clients (
 
 create table if not exists public.leads (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   name text not null,
   phone text not null,
   source text,
@@ -82,6 +88,7 @@ create table if not exists public.leads (
 
 create table if not exists public.services_catalog (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   name text not null,
   category text,
   duration_min integer not null default 0,
@@ -94,6 +101,7 @@ create table if not exists public.services_catalog (
 
 create table if not exists public.professionals (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   name text not null,
   phone text,
   email text,
@@ -113,6 +121,7 @@ create table if not exists public.professionals (
 
 create table if not exists public.financial_entries (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   booking_id bigint,
   client_name text,
   service_name text,
@@ -127,6 +136,7 @@ create table if not exists public.financial_entries (
 
 create table if not exists public.reviews (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   client_name text not null,
   professional_name text,
   score integer not null,
@@ -137,6 +147,7 @@ create table if not exists public.reviews (
 
 create table if not exists public.tasks (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   title text not null,
   owner text,
   due_date text,
@@ -150,6 +161,7 @@ create table if not exists public.tasks (
 
 create table if not exists public.automations (
   id bigint generated always as identity primary key,
+  tenant_slug text not null default 'renovo',
   name text not null,
   trigger_type text,
   message_template text,
@@ -222,9 +234,20 @@ create table if not exists public.whatsapp_conversation_map (
 
 create index if not exists bookings_date_idx on public.bookings (date);
 create index if not exists bookings_date_time_idx on public.bookings (date, time);
+create index if not exists bookings_tenant_date_time_id_idx on public.bookings (tenant_slug, date asc, time asc, id asc);
+create unique index if not exists bookings_unique_active_slot_tenant_idx on public.bookings (tenant_slug, date, time) where status in ('pending', 'confirmed');
 create index if not exists bookings_status_idx on public.bookings (status);
 create index if not exists bookings_whatsapp_thread_idx on public.bookings (whatsapp_thread_id);
 create index if not exists bookings_professional_id_idx on public.bookings (professional_id);
+create index if not exists bookings_completed_tenant_updated_id_idx on public.bookings (tenant_slug, updated_at desc, date desc, time desc, id desc) where status = 'completed';
+create index if not exists bookings_active_tenant_date_time_idx on public.bookings (tenant_slug, status, date asc, time asc, id asc) where status in ('pending', 'confirmed');
+create index if not exists financial_entries_tenant_due_id_idx on public.financial_entries (tenant_slug, due_date desc, id desc);
+create index if not exists financial_entries_tenant_status_due_idx on public.financial_entries (tenant_slug, status, due_date desc);
+create index if not exists leads_tenant_stage_idx on public.leads (tenant_slug, stage);
+create index if not exists tasks_tenant_status_idx on public.tasks (tenant_slug, status);
+create index if not exists clients_tenant_phone_idx on public.clients (tenant_slug, phone);
+create index if not exists services_catalog_tenant_active_idx on public.services_catalog (tenant_slug, active);
+create index if not exists professionals_tenant_active_idx on public.professionals (tenant_slug, active);
 create index if not exists whatsapp_threads_last_message_idx on public.whatsapp_threads (last_message_at desc);
 create index if not exists whatsapp_messages_thread_created_idx on public.whatsapp_messages (thread_id, created_at desc);
 create index if not exists whatsapp_conversation_meta_status_idx on public.whatsapp_conversation_meta (status);
@@ -326,3 +349,60 @@ drop trigger if exists whatsapp_conversation_map_set_updated_at on public.whatsa
 create trigger whatsapp_conversation_map_set_updated_at
 before update on public.whatsapp_conversation_map
 for each row execute function public.set_updated_at();
+
+create or replace function public.sync_booking_completed_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status = 'completed' and (old.status is distinct from 'completed' or new.completed_at is null) then
+    new.completed_at = coalesce(new.completed_at, now());
+  elsif new.status <> 'completed' then
+    new.completed_at = null;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists bookings_sync_completed_at on public.bookings;
+create trigger bookings_sync_completed_at
+before insert or update on public.bookings
+for each row execute function public.sync_booking_completed_at();
+
+-- RLS segura: bloqueia acesso anonimo e libera apenas service_role (backend Express)
+do $$
+declare
+  tbl text;
+  tables text[] := array[
+    'bookings',
+    'whatsapp_threads',
+    'whatsapp_messages',
+    'whatsapp_conversation_meta',
+    'whatsapp_internal_notes',
+    'whatsapp_sync_state',
+    'whatsapp_contact_map',
+    'whatsapp_conversation_map',
+    'availability_rules',
+    'clients',
+    'leads',
+    'services_catalog',
+    'professionals',
+    'financial_entries',
+    'reviews',
+    'tasks',
+    'automations',
+    'app_settings'
+  ];
+begin
+  foreach tbl in array tables loop
+    if exists (
+      select 1 from information_schema.tables
+      where table_schema = 'public' and table_name = tbl
+    ) then
+      execute format('alter table public.%I enable row level security;', tbl);
+      execute format('drop policy if exists service_role_all_%I on public.%I;', tbl, tbl);
+      execute format('create policy service_role_all_%I on public.%I for all to service_role using (true) with check (true);', tbl, tbl);
+    end if;
+  end loop;
+end;
+$$;

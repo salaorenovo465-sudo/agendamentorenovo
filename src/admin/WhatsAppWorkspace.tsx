@@ -159,18 +159,18 @@ export default function WhatsAppWorkspace({ adminKey, settings, tenantSlug }: Pr
 
     if (!instanceStatus?.exists) {
       return (
-        <div className="rounded-lg border border-neutral-200 bg-white p-6">
+        <div className="rounded-xl border border-[rgba(58,10,30,0.1)] bg-white p-6">
           <div className="flex items-start gap-3">
-            <QrCode className="h-5 w-5 text-emerald-600 mt-0.5" />
+            <QrCode className="h-5 w-5 text-[#3a0a1e] mt-0.5" />
             <div className="space-y-2">
-              <p className="text-sm font-semibold text-neutral-900">Crie a instancia WhatsApp do tenant</p>
-              <p className="text-sm text-neutral-600">
+              <p className="text-sm font-semibold text-[#1a0810]">Crie a instancia WhatsApp do tenant</p>
+              <p className="text-sm text-[#6a4555]">
                 A instancia sera criada com base no nome da empresa ({companyName}) e no slug da empresa ({tenantSlug}).
               </p>
               <button
                 onClick={() => void handleCreateInstance()}
                 disabled={busy}
-                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className="admin-btn-primary inline-flex items-center gap-2 text-sm font-semibold disabled:opacity-60"
               >
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <QrCode className="h-4 w-4" />}
                 <span>Criar instancia</span>

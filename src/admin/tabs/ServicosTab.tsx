@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Eye, Flower2, Heart, Loader2, Lock, Palette, Plus, Scissors, Sparkles, Trash2, WandSparkles, X, Zap } from 'lucide-react';
 
 import { toast } from '../AdminHelpers';
+import { MoneyEyeButton, useMoneyPrivacy } from '../MoneyPrivacyContext';
 import type { ServiceCatalogCategory, ServiceCatalogItem } from '../collaboratorUtils';
 
 type PriceType = 'fixed' | 'from' | 'consult';
@@ -235,6 +236,7 @@ export function ServicosTab({
   onBootstrapCatalog: (catalog: ServiceCatalogCategory[]) => Promise<void>;
   onVerifyMasterPassword: (password: string) => Promise<boolean>;
 }) {
+  const { maskMoneyText } = useMoneyPrivacy();
   const [editor, setEditor] = useState<ServiceEditor | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalError, setModalError] = useState('');
@@ -453,29 +455,28 @@ export function ServicosTab({
     : deleteIntent?.categoryName || '';
 
   return (
-    <div className="space-y-6">
-      <section className="admin-analytics-card" style={{ display: 'grid', gap: 18 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
-          <div style={{ minWidth: 0 }}>
-            <p style={{ margin: 0, fontSize: 11, fontWeight: 900, color: 'var(--admin-accent)', letterSpacing: '0.12em', textTransform: 'uppercase' }}>Orquestrador quantico</p>
-            <h3 style={{ margin: '6px 0 0', fontSize: 21, fontWeight: 900, color: 'var(--admin-text)' }}>Arquitetura de categorias e servicos</h3>
-            <p style={{ margin: '8px 0 0', fontSize: 13, color: 'var(--admin-text-muted)', lineHeight: 1.55 }}>
-              Cadastre servicos escolhendo categoria existente ou criando uma nova, com exclusao completa de servicos e categorias.
+    <div className="space-y-4">
+      <section className="agenda-command-center">
+        <div className="agenda-command-top">
+          <div className="agenda-command-copy">
+            <h2>Catálogo de Serviços e Categorias</h2>
+            <p>
+              Cadastre serviços escolhendo categoria existente ou criando uma nova, com controle de preços e durações.
             </p>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <button className="admin-btn-outline" onClick={() => openCreateEditor()} disabled={loading || submitting || deletionLocked} style={{ padding: '11px 16px' }}>
-              <WandSparkles style={{ width: 15, height: 15 }} />
-              Novo servico
+          <div className="agenda-command-actions">
+            <MoneyEyeButton variant="compact" />
+            <button className="admin-btn-outline agenda-header-btn" onClick={() => openCreateEditor()} disabled={loading || submitting || deletionLocked}>
+              <WandSparkles style={{ width: 14, height: 14 }} />
+              Novo serviço
             </button>
             <button
-              className="admin-btn-primary"
+              className="admin-btn-primary agenda-new-booking-btn"
               onClick={() => {
                 const editorState = buildCreateEditor(localServices);
                 setEditor({ ...editorState, categoryMode: 'new', selectedCategory: '', newCategory: '' });
               }}
               disabled={loading || submitting || deletionLocked}
-              style={{ padding: '11px 16px' }}
             >
               <Plus style={{ width: 15, height: 15 }} />
               Nova categoria
@@ -483,45 +484,27 @@ export function ServicosTab({
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
-          <div style={{ padding: '12px 14px', borderRadius: 16, border: '1px solid var(--admin-border)', background: 'var(--admin-surface-2)' }}>
-            <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: 'var(--admin-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Categorias</span>
-            <strong style={{ display: 'block', marginTop: 4, fontSize: 22, color: 'var(--admin-text)' }}>{summary.categories}</strong>
+        <div className="agenda-command-bottom">
+          <div className="agenda-toolbar-left">
+            <div className="agenda-stat-grid">
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Categorias</span>
+                <strong>{summary.categories}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-gold">
+                <span>Serviços</span>
+                <strong>{summary.services}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-green">
+                <span>Persistidos</span>
+                <strong>{summary.persisted}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Modo</span>
+                <strong>{managedCatalog ? 'Gerenciado' : 'Catálogo base'}</strong>
+              </div>
+            </div>
           </div>
-          <div style={{ padding: '12px 14px', borderRadius: 16, border: '1px solid var(--admin-border)', background: 'var(--admin-surface-2)' }}>
-            <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: 'var(--admin-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Servicos</span>
-            <strong style={{ display: 'block', marginTop: 4, fontSize: 22, color: 'var(--admin-text)' }}>{summary.services}</strong>
-          </div>
-          <div style={{ padding: '12px 14px', borderRadius: 16, border: '1px solid var(--admin-border)', background: 'var(--admin-surface-2)' }}>
-            <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: 'var(--admin-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Persistidos</span>
-            <strong style={{ display: 'block', marginTop: 4, fontSize: 22, color: 'var(--admin-text)' }}>{summary.persisted}</strong>
-          </div>
-          <div style={{
-            padding: '12px 14px',
-            borderRadius: 16,
-            border: managedCatalog ? '1px solid rgba(16,185,129,0.22)' : '1px solid rgba(212,175,55,0.24)',
-            background: managedCatalog ? 'rgba(16,185,129,0.08)' : 'rgba(212,175,55,0.08)',
-          }}>
-            <span style={{ display: 'block', fontSize: 11, fontWeight: 900, color: 'var(--admin-text-muted)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Modo</span>
-            <strong style={{ display: 'block', marginTop: 4, fontSize: 18, color: managedCatalog ? '#047857' : 'var(--admin-accent)' }}>
-              {managedCatalog ? 'Quantico gerenciado' : 'Catalogo base'}
-            </strong>
-          </div>
-        </div>
-
-        <div style={{
-          padding: '14px 16px',
-          borderRadius: 16,
-          border: managedCatalog ? '1px solid rgba(16,185,129,0.22)' : '1px solid rgba(212,175,55,0.24)',
-          background: managedCatalog
-            ? 'linear-gradient(135deg, rgba(16,185,129,0.08), rgba(16,185,129,0.03))'
-            : 'linear-gradient(135deg, rgba(212,175,55,0.12), rgba(58,10,30,0.05))',
-        }}>
-          <p style={{ margin: 0, fontSize: 12.5, lineHeight: 1.6, color: 'var(--admin-text-muted)', fontWeight: 700 }}>
-            {managedCatalog
-              ? 'Todas as operacoes agora usam o catalogo persistido do backend. Excluir categoria remove todos os servicos dela.'
-              : 'O catalogo ainda esta na base padrao. Na primeira alteracao estrutural, o sistema migra o snapshot atual para o modo quantico gerenciado.'}
-          </p>
         </div>
       </section>
 
@@ -615,7 +598,7 @@ export function ServicosTab({
 
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
                         <span style={{ padding: '8px 12px', borderRadius: 12, background: 'var(--admin-bg)', fontSize: 13, fontWeight: 800, color: 'var(--admin-accent)' }}>
-                          {service.price}
+                          {maskMoneyText(service.price)}
                         </span>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                           <span style={{ padding: '6px 10px', borderRadius: 999, border: '1px solid var(--admin-border)', background: '#fff', fontSize: 11.5, fontWeight: 700, color: 'var(--admin-text-muted)' }}>
@@ -661,7 +644,7 @@ export function ServicosTab({
             <div className="admin-modal-body">
               <div style={{ display: 'grid', gap: 16 }}>
                 {!managedCatalog && (
-                  <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid rgba(212,175,55,0.24)', background: 'rgba(212,175,55,0.08)', fontSize: 12.5, fontWeight: 700, color: 'var(--admin-text-muted)', lineHeight: 1.55 }}>
+                  <div style={{ padding: '12px 14px', borderRadius: 14, border: '1px solid rgba(58,10,30,0.16)', background: 'rgba(58,10,30,0.04)', fontSize: 12.5, fontWeight: 700, color: 'var(--admin-text-muted)', lineHeight: 1.55 }}>
                     Esta acao vai migrar o catalogo atual para o modo quantico gerenciado, tornando as alteracoes persistentes e liberando exclusao real de categorias e servicos.
                   </div>
                 )}

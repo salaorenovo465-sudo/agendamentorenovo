@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 
 import WAAvatar from './WAAvatar';
+import { useMoneyPrivacy } from '../MoneyPrivacyContext';
 import type { WAContact, ConversationStatus, BookingRescheduleModal, BookingCancelModal } from './wa-types';
 import type { AdminBooking, AdminInternalNote } from '../types';
 import { bookingStatusLabel, formatDateTimeLabel, noteTimeLabel, inferServiceCategory, parseServicePrice } from './wa-utils';
@@ -75,6 +76,7 @@ export default function WASidePanel({
   onRefreshPanel,
   onClose,
 }: Props) {
+  const { maskMoneyText } = useMoneyPrivacy();
   const [sectionOpen, setSectionOpen] = useState({ info: true, ops: true, bookings: true, notes: true });
   const [reschedule, setReschedule] = useState<BookingRescheduleModal>({ open: false, bookingId: null, date: '', time: '' });
   const [cancel, setCancel] = useState<BookingCancelModal>({ open: false, bookingId: null, reason: '' });
@@ -203,7 +205,7 @@ export default function WASidePanel({
                         <span className="wa2-booking-category">{inferServiceCategory(b.service)}</span>
                         <span className="wa2-booking-meta">
                           {formatDateTimeLabel(b.date, b.time)}
-                          {b.servicePrice && <> · <strong>{parseServicePrice(b.servicePrice)}</strong></>}
+                          {b.servicePrice && <> · <strong>{maskMoneyText(parseServicePrice(b.servicePrice))}</strong></>}
                         </span>
                       </div>
                       <span className={`wa2-booking-status ${statusColor(b.status)}`}>

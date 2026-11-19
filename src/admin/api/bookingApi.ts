@@ -1,5 +1,15 @@
 import { apiUrl } from '../../apiBase';
-import type { AdminBooking, AdminCreateBookingPayload } from '../types';
+import type {
+  AdminBooking,
+  AdminBookingBoardCounts,
+  AdminBookingBoardResponse,
+  AdminBookingCalendarResponse,
+  AdminCompletedHistoryFilters,
+  AdminCompletedHistoryResponse,
+  AdminCreateBookingPayload,
+  AdminUnifiedHistoryFilters,
+  AdminUnifiedHistoryResponse,
+} from '../types';
 import { requestAdmin, withTenantQuery } from './apiCore';
 
 type BookingAvailability = {
@@ -9,7 +19,7 @@ type BookingAvailability = {
 
 export const listAdminBookings = async (
   adminKey: string,
-  filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string },
+  filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string; mode?: 'board' | 'full'; completedLimit?: number },
   tenantSlug?: string,
 ): Promise<AdminBooking[]> => {
   const params = new URLSearchParams();
@@ -21,11 +31,142 @@ export const listAdminBookings = async (
       params.set('endDate', filters.endDate);
     }
   }
+  if (filters?.mode) {
+    params.set('mode', filters.mode);
+  }
+  if (filters?.completedLimit) {
+    params.set('completedLimit', String(filters.completedLimit));
+  }
 
   const query = params.toString();
   const url = withTenantQuery(query ? `/api/admin/bookings?${query}` : '/api/admin/bookings', tenantSlug);
   const response = await requestAdmin<{ bookings: AdminBooking[] }>(url, adminKey);
   return response.bookings;
+};
+
+export const listAdminBookingsBoard = async (
+  adminKey: string,
+  filters?: { scope?: 'all' | 'range'; startDate?: string; endDate?: string; completedLimit?: number },
+  tenantSlug?: string,
+): Promise<AdminBookingBoardResponse> => {
+  const params = new URLSearchParams();
+  params.set('mode', 'board');
+  params.set('completedLimit', String(filters?.completedLimit ?? 20));
+  if (filters?.scope === 'all') {
+    params.set('scope', 'all');
+  } else if (filters?.startDate) {
+    params.set('date', filters.startDate);
+    if (filters.endDate && filters.endDate !== filters.startDate) {
+      params.set('endDate', filters.endDate);
+    }
+  }
+
+  const url = withTenantQuery(`/api/admin/bookings?${params.toString()}`, tenantSlug);
+  const response = await requestAdmin<{
+    bookings: AdminBooking[];
+    counts?: AdminBookingBoardCounts;
+    completedLimit?: number;
+    completedTotal?: number;
+    hasMoreCompleted?: boolean;
+  }>(url, adminKey);
+
+  const bookings = response.bookings || [];
+  const completedInPayload = bookings.filter((b) => b.status === 'completed').length;
+  const completedTotal = response.completedTotal ?? response.counts?.completed ?? completedInPayload;
+  const completedLimit = response.completedLimit ?? (filters?.completedLimit ?? 20);
+
+  return {
+    bookings,
+    counts: response.counts ?? {
+      total: bookings.length,
+      pending: bookings.filter((b) => b.status === 'pending').length,
+      confirmed: bookings.filter((b) => b.status === 'confirmed').length,
+      completed: completedTotal,
+      rejected: bookings.filter((b) => b.status === 'rejected').length,
+      assigned: bookings.filter((b) => Boolean(b.professionalId)).length,
+    },
+    completedLimit,
+    completedTotal,
+    hasMoreCompleted: response.hasMoreCompleted ?? completedTotal > completedInPayload,
+  };
+};
+
+export const getAdminBookingsCalendar = async (
+  adminKey: string,
+  filters: { month?: string; startDate?: string; endDate?: string; signal?: AbortSignal },
+  tenantSlug?: string,
+): Promise<AdminBookingCalendarResponse> => {
+  const params = new URLSearchParams();
+  if (filters.month) {
+    params.set('month', filters.month);
+  } else if (filters.startDate) {
+    params.set('startDate', filters.startDate);
+    if (filters.endDate && filters.endDate !== filters.startDate) {
+      params.set('endDate', filters.endDate);
+    }
+  }
+
+  const url = withTenantQuery(`/api/admin/bookings/calendar?${params.toString()}`, tenantSlug);
+  return requestAdmin<AdminBookingCalendarResponse>(url, adminKey, {
+    method: 'GET',
+    signal: filters.signal,
+  });
+};
+
+export const listCompletedAdminBookings = async (
+  adminKey: string,
+  filters: AdminCompletedHistoryFilters,
+  tenantSlug?: string,
+  signal?: AbortSignal,
+): Promise<AdminCompletedHistoryResponse> => {
+  const params = new URLSearchParams();
+  params.set('page', String(filters.page ?? 1));
+  params.set('limit', String(filters.limit ?? 20));
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim());
+  }
+  if (filters.startDate?.trim()) {
+    params.set('startDate', filters.startDate.trim());
+  }
+  if (filters.endDate?.trim()) {
+    params.set('endDate', filters.endDate.trim());
+  }
+  if (filters.professionalId?.trim()) {
+    params.set('professionalId', filters.professionalId.trim());
+  }
+  if (filters.cursor?.trim()) {
+    params.set('cursor', filters.cursor.trim());
+  }
+
+  const url = withTenantQuery(`/api/admin/bookings/completed?${params.toString()}`, tenantSlug);
+  return requestAdmin<AdminCompletedHistoryResponse>(url, adminKey, { method: 'GET', signal });
+};
+
+export const listUnifiedAdminBookingsHistory = async (
+  adminKey: string,
+  filters: AdminUnifiedHistoryFilters,
+  tenantSlug?: string,
+  signal?: AbortSignal,
+): Promise<AdminUnifiedHistoryResponse> => {
+  const params = new URLSearchParams();
+  params.set('status', filters.status ?? 'all');
+  params.set('page', String(filters.page ?? 1));
+  params.set('limit', String(filters.limit ?? 20));
+  if (filters.search?.trim()) {
+    params.set('search', filters.search.trim());
+  }
+  if (filters.startDate?.trim()) {
+    params.set('startDate', filters.startDate.trim());
+  }
+  if (filters.endDate?.trim()) {
+    params.set('endDate', filters.endDate.trim());
+  }
+  if (filters.professionalId?.trim()) {
+    params.set('professionalId', filters.professionalId.trim());
+  }
+
+  const url = withTenantQuery(`/api/admin/bookings/history?${params.toString()}`, tenantSlug);
+  return requestAdmin<AdminUnifiedHistoryResponse>(url, adminKey, { method: 'GET', signal });
 };
 
 export const deleteAdminBooking = async (
@@ -96,6 +237,13 @@ export const assignProfessionalToAdminBooking = async (
 
 export const completeAdminBooking = async (id: number, adminKey: string, tenantSlug?: string): Promise<AdminBooking> => {
   const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/complete`, tenantSlug), adminKey, {
+    method: 'POST',
+  });
+  return response.booking;
+};
+
+export const reopenAdminBooking = async (id: number, adminKey: string, tenantSlug?: string): Promise<AdminBooking> => {
+  const response = await requestAdmin<{ booking: AdminBooking }>(withTenantQuery(`/api/admin/bookings/${id}/reopen`, tenantSlug), adminKey, {
     method: 'POST',
   });
   return response.booking;

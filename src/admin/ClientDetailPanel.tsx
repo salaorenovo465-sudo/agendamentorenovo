@@ -3,6 +3,7 @@ import { Calendar, CheckCircle2, Clock, Loader2, Mail, MapPin, Phone, Save, Spar
 
 import { DangerConfirmModal } from './AdminHelpers';
 import { listBookingsByPhoneForAdmin, updateWorkbenchEntityForAdmin, deleteWorkbenchEntityForAdmin } from './api';
+import { MoneyEyeButton, useMoneyPrivacy } from './MoneyPrivacyContext';
 import type { AdminBooking } from './types';
 
 type Props = {
@@ -38,6 +39,7 @@ const formatDate = (date: string): string => {
 const STATUS_OPTIONS = ['novo', 'ativo', 'recorrente', 'VIP', 'inativo', 'em risco'];
 
 export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated }: Props) {
+  const { maskCurrency } = useMoneyPrivacy();
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
@@ -239,7 +241,7 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
                           </p>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          {Number.isFinite(price) && price > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--admin-accent)' }}>R$ {price.toFixed(2)}</span>}
+                          {Number.isFinite(price) && price > 0 && <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--admin-accent)' }}>{maskCurrency(price)}</span>}
                           <span style={{ padding: '3px 10px', borderRadius: 12, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.color, border: `1px solid ${badge.border}` }}>{badge.label}</span>
                         </div>
                       </div>
@@ -271,7 +273,7 @@ export default function ClientDetailPanel({ client, adminKey, onClose, onUpdated
                     </div>
                     <div style={{ padding: 16, borderRadius: 'var(--admin-radius-sm)', background: 'var(--admin-surface-2)', border: '1px solid var(--admin-border)', textAlign: 'center' }}>
                       <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'linear-gradient(135deg, #9b7b4e, #c9a96e)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}><Sparkles style={{ width: 16, height: 16, color: '#fff' }} /></div>
-                      <p style={{ fontSize: 22, fontWeight: 800, color: 'var(--admin-accent)', margin: 0 }}>R$ {analytics.totalValue.toFixed(2)}</p>
+                      <p style={{ fontSize: 22, fontWeight: 800, color: 'var(--admin-accent)', margin: 0 }}>{maskCurrency(analytics.totalValue)}</p>
                       <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', color: 'var(--admin-text-muted)', margin: '2px 0 0' }}>Valor total</p>
                     </div>
                   </div>

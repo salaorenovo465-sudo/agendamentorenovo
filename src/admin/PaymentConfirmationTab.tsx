@@ -18,6 +18,7 @@ import {
 } from './api';
 import type { AdminBooking, AdminFinanceEntry } from './types';
 import { DangerConfirmModal } from './AdminHelpers';
+import { MoneyEyeButton, useMoneyPrivacy } from './MoneyPrivacyContext';
 
 type Props = {
   adminKey: string;
@@ -173,6 +174,7 @@ const sumPrimitiveAmounts = (rows: number[]): number =>
   rows.reduce((total, row) => total + row, 0);
 
 export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistory }: Props) {
+  const { maskCurrency } = useMoneyPrivacy();
   const [entries, setEntries] = useState<AdminFinanceEntry[]>([]);
   const [bookings, setBookings] = useState<AdminBooking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -467,10 +469,11 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
           </p>
           <div className="payments-hero-meta">
             <span>{currentWindowLabel}</span>
-            <span>{formatCurrency(expectedTotal)} em movimentacao bruta</span>
+            <span>{maskCurrency(expectedTotal)} em movimentacao bruta</span>
           </div>
         </div>
         <div className="payments-hero-actions">
+          <MoneyEyeButton />
           <button
             type="button"
             className="admin-btn-danger"
@@ -501,7 +504,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                 <BadgeDollarSign style={{ width: 18, height: 18 }} />
               </div>
               <span>Recebido</span>
-              <strong>{formatCurrency(receivedTotal)}</strong>
+              <strong>{maskCurrency(receivedTotal)}</strong>
               <small>Somente valores ja baixados como pagos.</small>
             </article>
 
@@ -510,7 +513,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                 <Wallet style={{ width: 18, height: 18 }} />
               </div>
               <span>Em aberto</span>
-              <strong>{formatCurrency(pendingTotal)}</strong>
+              <strong>{maskCurrency(pendingTotal)}</strong>
               <small>{pendingEntries.length + filteredMissingEntries.length} registro(s) aguardando baixa ou geracao.</small>
             </article>
 
@@ -519,7 +522,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                 <AlertTriangle style={{ width: 18, height: 18 }} />
               </div>
               <span>Vencido</span>
-              <strong>{formatCurrency(overdueTotal)}</strong>
+              <strong>{maskCurrency(overdueTotal)}</strong>
               <small>Lancamentos pendentes com data anterior a hoje.</small>
             </article>
 
@@ -528,7 +531,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                 <ArrowDownCircle style={{ width: 18, height: 18 }} />
               </div>
               <span>Ticket medio</span>
-              <strong>{formatCurrency(ticketAverage)}</strong>
+              <strong>{maskCurrency(ticketAverage)}</strong>
               <small>{filteredEntries.length + filteredMissingEntries.length} movimentacao(oes) no recorte.</small>
             </article>
           </section>
@@ -537,7 +540,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
             {methodBreakdown.map((method) => (
               <article key={method.value} className="payments-method-card">
                 <span>{method.label}</span>
-                <strong>{formatCurrency(method.total)}</strong>
+                <strong>{maskCurrency(method.total)}</strong>
                 <small>{method.count} registro(s)</small>
               </article>
             ))}
@@ -679,7 +682,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                       </div>
 
                       <div className="payments-row-side">
-                        <strong>{estimatedAmount > 0 ? formatCurrency(estimatedAmount) : 'Sob consulta'}</strong>
+                        <strong>{estimatedAmount > 0 ? maskCurrency(estimatedAmount) : 'Sob consulta'}</strong>
                         <button
                           type="button"
                           className="admin-btn-outline"
@@ -732,7 +735,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                         </div>
 
                         <div className="payments-row-side">
-                          <strong>{formatCurrency(entry.resolvedAmount)}</strong>
+                          <strong>{maskCurrency(entry.resolvedAmount)}</strong>
                           <select
                             className="admin-input-sm"
                             value={method}
@@ -767,7 +770,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                   <h4>Historico financeiro</h4>
                 </div>
                 <p>
-                  {filteredEntries.length} lancamento(s) reais | {formatCurrency(expectedTotal)} movimentados no recorte atual.
+                  {filteredEntries.length} lancamento(s) reais | {maskCurrency(expectedTotal)} movimentados no recorte atual.
                 </p>
               </div>
 
@@ -783,7 +786,7 @@ export default function PaymentConfirmationTab({ adminKey, onClearPaymentsHistor
                           <span>{entry.serviceName || entry.booking?.service || 'Servico nao informado'}</span>
                         </div>
                         <div className="payments-ledger-value">
-                          <strong>{formatCurrency(entry.resolvedAmount)}</strong>
+                          <strong>{maskCurrency(entry.resolvedAmount)}</strong>
                           <span className={`payments-status-pill ${entry.status === 'pago' ? 'is-paid' : entry.isOverdue ? 'is-overdue' : 'is-pending'}`}>
                             {entry.status === 'pago' ? 'Pago' : entry.isOverdue ? 'Pendente vencido' : 'Pendente'}
                           </span>

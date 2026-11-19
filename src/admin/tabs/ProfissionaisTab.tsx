@@ -91,7 +91,7 @@ function CollaboratorEditorModal({
         <div className="admin-modal-header collaborator-modal-header">
           <div className="admin-modal-title-row">
             <div className="admin-modal-icon admin-modal-icon-gold">
-              <UserRound style={{ width: 18, height: 18, color: 'var(--admin-gold, #d4af37)' }} />
+              <UserRound style={{ width: 18, height: 18, color: 'var(--admin-accent, #3a0a1e)' }} />
             </div>
             <div>
               <h3 className="admin-modal-title">{title}</h3>
@@ -419,20 +419,48 @@ export function ProfissionaisTab({
     }
   };
 
+  const activeCount = collaborators.filter((c) => c.active).length;
+  const inactiveCount = collaborators.length - activeCount;
+
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <div>
-          <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>Colaboradores ({profs.length})</h3>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--admin-text-muted)' }}>Centro de organizacao por categoria, servico e comissao individual.</p>
+    <div className="space-y-4">
+      <section className="agenda-command-center">
+        <div className="agenda-command-top">
+          <div className="agenda-command-copy">
+            <h2>Equipe e Colaboradores</h2>
+            <p>Centro de organização por categoria, cobertura de serviços, jornada e comissão individual.</p>
+          </div>
+          <div className="agenda-command-actions">
+            <button onClick={() => setShowNewProf(true)} className="admin-btn-primary agenda-new-booking-btn">
+              <Plus style={{ width: 15, height: 15 }} /> Cadastrar colaborador
+            </button>
+          </div>
         </div>
-        <button onClick={() => setShowNewProf(true)} className="admin-btn-primary" style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus style={{ width: 14, height: 14 }} /> Cadastrar colaborador
-        </button>
-      </div>
+
+        <div className="agenda-command-bottom">
+          <div className="agenda-toolbar-left">
+            <div className="agenda-stat-grid">
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Total</span>
+                <strong>{collaborators.length}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-green">
+                <span>Ativos</span>
+                <strong>{activeCount}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-gold">
+                <span>Inativos</span>
+                <strong>{inactiveCount}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {loading ? (
-        <p style={{ fontSize: 13, color: 'var(--admin-text-muted)' }}>Carregando...</p>
+        <div className="agenda-loading-state">Carregando colaboradores...</div>
+      ) : collaborators.length === 0 ? (
+        <div className="agenda-empty-column">Nenhum colaborador cadastrado.</div>
       ) : (
         <div className="collaborator-card-grid">
           {collaborators.map((prof) => (

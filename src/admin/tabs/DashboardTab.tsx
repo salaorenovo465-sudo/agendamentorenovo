@@ -1,391 +1,380 @@
-import { useMemo, useState } from 'react';
-import { Calendar, CheckCircle2, Clock, Lock, Trash2, Users, X } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
 
-import { formatDateBR } from '../AdminUtils';
-import type { AdminBooking, WorkbenchOverview } from '../types';
+import { toast } from '../AdminHelpers';
+import { getDashboardFinanceForAdmin, getSupabaseReadinessForAdmin } from '../api';
+import { type TabId, formatDateBR, getTodayDate } from '../AdminUtils';
+import { useMoneyPrivacy } from '../MoneyPrivacyContext';
+import {
+  DashboardHeader,
+  resolvePresetDates,
+  type DashboardPeriodPreset,
+} from '../dashboard/DashboardHeader';
+import { DashboardKpiGrid } from '../dashboard/DashboardKpiGrid';
+import { DashboardFinanceSection } from '../dashboard/DashboardFinanceSection';
+import { DashboardCalendarAgenda } from '../dashboard/DashboardCalendarAgenda';
+import { DashboardLeadsSection } from '../dashboard/DashboardLeadsSection';
+import { DashboardOperationsSection } from '../dashboard/DashboardOperationsSection';
+import type {
+  DashboardFinanceEntryRow,
+  DashboardFinanceGroupBy,
+  DashboardFinanceResponse,
+  DashboardFinanceStatusFilter,
+  SupabaseReadinessReport,
+  WorkbenchOverview,
+} from '../types';
+import '../dashboard/dashboard.css';
 
 type Props = {
+  adminKey: string;
+  tenantSlug: string;
+  tenantName: string;
   overview: WorkbenchOverview;
-  bookings: AdminBooking[];
-  bookingsLoading: boolean;
   overviewLoading: boolean;
+  overviewHasLoadedOnce: boolean;
+  overviewError: string;
   dateFilter: string;
+  dateFilterEnd: string;
   dateScope: 'all' | 'range';
-  dateLabel: string;
   stageSummary: [string, unknown][];
+  onApplyDatePeriod: (next: { scope: 'all' | 'range'; startDate: string; endDate: string }) => void;
+  onReloadOverview: () => void;
+  onOpenAgendaForDate: (date: string) => void;
+  onNavigateTab?: (tabId: TabId) => void;
   onResetFinance: (password: string, date?: string) => Promise<boolean>;
 };
 
+const escapeCsvCell = (raw: string | number | null | undefined): string => {
+  const str = String(raw ?? '').replace(/\r?\n/g, ' ');
+  return `"${str.replace(/"/g, '""')}"`;
+};
+
+const inferMatchingPreset = (
+  scope: 'all' | 'range',
+  startDate: string,
+  endDate: string,
+): DashboardPeriodPreset => {
+  if (scope === 'all') {
+    return 'all';
+  }
+  const normalizedEnd = endDate || startDate;
+  for (const preset of ['today', 'last7', 'thisMonth', 'prevMonth'] as const) {
+    const resolved = resolvePresetDates(preset);
+    if (resolved.startDate === startDate && resolved.endDate === normalizedEnd) {
+      return preset;
+    }
+  }
+  return 'custom';
+};
+
 export function DashboardTab({
+  adminKey,
+  tenantSlug,
+  tenantName,
   overview,
-  bookings,
-  bookingsLoading,
   overviewLoading,
+  overviewHasLoadedOnce,
+  overviewError,
   dateFilter,
+  dateFilterEnd,
   dateScope,
-  dateLabel,
   stageSummary,
+  onApplyDatePeriod,
+  onReloadOverview,
+  onOpenAgendaForDate,
+  onNavigateTab,
   onResetFinance,
 }: Props) {
-  const [showResetModal, setShowResetModal] = useState(false);
-  const [resetPassword, setResetPassword] = useState('');
-  const [resetError, setResetError] = useState('');
-  const [resetLoading, setResetLoading] = useState(false);
-  const [resetScope, setResetScope] = useState<'day' | 'all'>('day');
+  const { hideMoney } = useMoneyPrivacy();
+  const [activePreset, setActivePreset] = useState<DashboardPeriodPreset>(() =>
+    inferMatchingPreset(dateScope, dateFilter, dateFilterEnd),
+  );
+  const [financeGroupBy, setFinanceGroupBy] = useState<DashboardFinanceGroupBy | 'auto'>('auto');
+  const [financeEntryStatus, setFinanceEntryStatus] = useState<DashboardFinanceStatusFilter>('all');
+  const [financeSearchInput, setFinanceSearchInput] = useState<string>('');
+  const [financeSearch, setFinanceSearch] = useState<string>('');
+  const [financePage, setFinancePage] = useState<number>(1);
+  const [financeData, setFinanceData] = useState<DashboardFinanceResponse | null>(null);
+  const [financeLoading, setFinanceLoading] = useState<boolean>(true);
+  const [financeError, setFinanceError] = useState<string>('');
+  const [exportingCsv, setExportingCsv] = useState<boolean>(false);
+  const [supabaseStatus, setSupabaseStatus] = useState<SupabaseReadinessReport | null>(null);
+  const [supabaseLoading, setSupabaseLoading] = useState<boolean>(true);
+  const [refreshTick, setRefreshTick] = useState<number>(0);
 
-  const hasFinanceData = overview.finance.expected > 0 || overview.finance.received > 0;
-  const financeTitle = dateScope === 'all' ? 'Financeiro geral' : `Financeiro do periodo (${dateLabel})`;
-  const bookingsTitle = dateScope === 'all' ? 'Agenda geral' : `Agendamentos do periodo (${dateLabel})`;
+  useEffect(() => {
+    const trimmed = financeSearchInput.trim();
+    if (trimmed === financeSearch) return;
+    const timer = window.setTimeout(() => {
+      setFinanceSearch(trimmed);
+      setFinancePage(1);
+    }, 240);
+    return () => window.clearTimeout(timer);
+  }, [financeSearch, financeSearchInput]);
 
-  const dashboardBookings = useMemo(() => {
-    const sorted = [...bookings].sort((a, b) => {
-      const aStamp = new Date(`${a.date}T${a.time}`).getTime();
-      const bStamp = new Date(`${b.date}T${b.time}`).getTime();
-      return aStamp - bStamp;
-    });
+  useEffect(() => {
+    setActivePreset(inferMatchingPreset(dateScope, dateFilter, dateFilterEnd));
+    setFinancePage(1);
+  }, [dateScope, dateFilter, dateFilterEnd]);
 
-    if (dateScope !== 'all') {
-      return sorted.slice(0, 8);
+  const fetchDashboardFinance = useCallback(async (signal?: AbortSignal) => {
+    if (!adminKey) return;
+    setFinanceLoading(true);
+    setFinanceError('');
+    try {
+      const response = await getDashboardFinanceForAdmin(
+        adminKey,
+        {
+          scope: dateScope,
+          startDate: dateScope === 'range' ? dateFilter : undefined,
+          endDate: dateScope === 'range' ? (dateFilterEnd || dateFilter) : undefined,
+          groupBy: financeGroupBy,
+          entryStatus: financeEntryStatus,
+          search: financeSearch,
+          page: financePage,
+          limit: 10,
+          signal,
+        },
+        tenantSlug,
+      );
+      if (signal?.aborted) return;
+      setFinanceData(response);
+    } catch (err) {
+      if (signal?.aborted || (err instanceof Error && err.name === 'AbortError')) {
+        return;
+      }
+      setFinanceError(err instanceof Error ? err.message : 'Erro ao carregar dados financeiros.');
+    } finally {
+      if (!signal?.aborted) {
+        setFinanceLoading(false);
+      }
     }
+  }, [adminKey, dateFilter, dateFilterEnd, dateScope, financeEntryStatus, financeGroupBy, financePage, financeSearch, tenantSlug]);
 
-    const now = Date.now();
-    const upcoming = sorted.filter((booking) => new Date(`${booking.date}T${booking.time}`).getTime() >= now);
-    if (upcoming.length > 0) {
-      return upcoming.slice(0, 8);
-    }
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetchDashboardFinance(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [fetchDashboardFinance, refreshTick]);
 
-    return sorted.slice(-8).reverse();
-  }, [bookings, dateScope]);
+  useEffect(() => {
+    if (!adminKey) return;
+    const controller = new AbortController();
+    setSupabaseLoading(true);
+    getSupabaseReadinessForAdmin(adminKey, tenantSlug, controller.signal)
+      .then((report) => {
+        if (!controller.signal.aborted) {
+          setSupabaseStatus(report);
+        }
+      })
+      .catch(() => {
+        // Silently ignore transient readiness errors so Dashboard remains uncluttered
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setSupabaseLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, [adminKey, tenantSlug, refreshTick]);
 
-  const handleResetConfirm = async () => {
-    if (!resetPassword.trim()) {
-      setResetError('Digite a senha de administrador.');
+  const handleExportFinanceCsv = async () => {
+    if (exportingCsv || !adminKey) return;
+    if (
+      hideMoney &&
+      !window.confirm(
+        'Os valores monetários estão ocultos na tela pelo modo de privacidade. O arquivo CSV conterá os valores reais dos lançamentos. Deseja exportar mesmo assim?',
+      )
+    ) {
       return;
     }
 
-    setResetLoading(true);
-    setResetError('');
-
+    setExportingCsv(true);
     try {
-      const success = await onResetFinance(resetPassword, resetScope === 'day' ? dateFilter : undefined);
-      if (success) {
-        setShowResetModal(false);
-        setResetPassword('');
-        setResetError('');
-        setResetScope('day');
-      } else {
-        setResetError('Senha incorreta.');
-      }
-    } catch {
-      setResetError('Erro ao zerar financeiro.');
+      const collected: DashboardFinanceEntryRow[] = [];
+      let currentPage = 1;
+      let totalPages = 1;
+
+      do {
+        const res = await getDashboardFinanceForAdmin(
+          adminKey,
+          {
+            scope: dateScope,
+            startDate: dateScope === 'range' ? dateFilter : undefined,
+            endDate: dateScope === 'range' ? (dateFilterEnd || dateFilter) : undefined,
+            groupBy: financeGroupBy,
+            entryStatus: financeEntryStatus,
+            search: financeSearch,
+            page: currentPage,
+            limit: 50,
+          },
+          tenantSlug,
+        );
+        collected.push(...res.entries);
+        totalPages = Math.min(res.pagination.totalPages, 40);
+        currentPage += 1;
+      } while (currentPage <= totalPages);
+
+      const header = [
+        'ID',
+        'Agendamento',
+        'Vencimento',
+        'Pago em',
+        'Cliente',
+        'Serviço',
+        'Forma de Pagamento',
+        'Status',
+        'Valor (BRL)',
+      ]
+        .map(escapeCsvCell)
+        .join(';');
+
+      const rows = collected.map((entry) =>
+        [
+          entry.id,
+          entry.bookingId ?? '',
+          entry.dueDate ? formatDateBR(entry.dueDate) : '',
+          entry.paidAt ? entry.paidAt.slice(0, 10) : '',
+          entry.clientName,
+          entry.serviceName,
+          entry.paymentMethod || 'Não informado',
+          entry.status === 'pago' ? 'Pago' : 'Pendente',
+          entry.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+        ]
+          .map(escapeCsvCell)
+          .join(';'),
+      );
+
+      const csvContent = `\uFEFF${[header, ...rows].join('\r\n')}`;
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const scopeSuffix = dateScope === 'all' ? 'geral' : `${dateFilter}_a_${dateFilterEnd || dateFilter}`;
+      anchor.href = url;
+      anchor.download = `financeiro-${tenantSlug}-${scopeSuffix}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(url);
+      toast.success(`${collected.length} lançamento(s) exportado(s) em CSV.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Erro ao exportar lançamentos financeiros.');
     } finally {
-      setResetLoading(false);
+      setExportingCsv(false);
     }
   };
 
+  const handleApplyPeriod = (next: {
+    preset: DashboardPeriodPreset;
+    scope: 'all' | 'range';
+    startDate: string;
+    endDate: string;
+  }) => {
+    setActivePreset(next.preset);
+    setFinancePage(1);
+    onApplyDatePeriod({
+      scope: next.scope,
+      startDate: next.startDate,
+      endDate: next.endDate,
+    });
+  };
+
+  const handleManualRefresh = () => {
+    onReloadOverview();
+    setRefreshTick((tick) => tick + 1);
+  };
+
+  const handleResetFinanceAndReload = async (password: string, date?: string): Promise<boolean> => {
+    const success = await onResetFinance(password, date);
+    if (success) {
+      setFinancePage(1);
+      setRefreshTick((tick) => tick + 1);
+    }
+    return success;
+  };
+
+  const financeScopeLabel = dateScope === 'all'
+    ? 'Visão geral (todo o histórico)'
+    : dateFilter === (dateFilterEnd || dateFilter)
+      ? formatDateBR(dateFilter)
+      : `${formatDateBR(dateFilter)} até ${formatDateBR(dateFilterEnd || dateFilter)}`;
+
   return (
-    <div className="space-y-4">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <div className="admin-stat-card">
-          <div className="admin-stat-icon" style={{ background: 'linear-gradient(135deg, #3a0a1e, #4e1028)' }}>
-            <Calendar style={{ width: 20, height: 20, color: '#d4af37' }} />
-          </div>
-          <div>
-            <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--admin-text-muted)' }}>Agendamentos</p>
-            <p style={{ fontSize: 24, fontWeight: 800, color: 'var(--admin-accent)', marginTop: 2 }}>{overview.bookingStats.total}</p>
-          </div>
-        </div>
+    <div className="dash-shell">
+      <DashboardHeader
+        tenantName={tenantName}
+        dateScope={dateScope}
+        dateFilter={dateFilter}
+        dateFilterEnd={dateFilterEnd || dateFilter}
+        activePreset={activePreset}
+        isRefreshing={overviewLoading || financeLoading}
+        onApplyPeriod={handleApplyPeriod}
+        onRefresh={handleManualRefresh}
+      />
 
-        <div className="admin-stat-card">
-          <div className="admin-stat-icon" style={{ background: 'linear-gradient(135deg, #d97706, #f59e0b)' }}>
-            <Clock style={{ width: 20, height: 20, color: '#fff' }} />
-          </div>
-          <div>
-            <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--admin-text-muted)' }}>Pendentes</p>
-            <p style={{ fontSize: 24, fontWeight: 800, color: '#d97706', marginTop: 2 }}>{overview.bookingStats.pending}</p>
-          </div>
-        </div>
+      <DashboardKpiGrid
+        overview={overview}
+        loading={overviewLoading}
+        hasLoadedOnce={overviewHasLoadedOnce}
+        error={overviewError}
+        dateScope={dateScope}
+        onRetry={onReloadOverview}
+      />
 
-        <div className="admin-stat-card">
-          <div className="admin-stat-icon" style={{ background: 'linear-gradient(135deg, #059669, #10b981)' }}>
-            <CheckCircle2 style={{ width: 20, height: 20, color: '#fff' }} />
-          </div>
-          <div>
-            <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--admin-text-muted)' }}>Confirmados</p>
-            <p style={{ fontSize: 24, fontWeight: 800, color: '#059669', marginTop: 2 }}>{overview.bookingStats.confirmed}</p>
-          </div>
-        </div>
+      <DashboardFinanceSection
+        data={financeData}
+        loading={financeLoading}
+        error={financeError}
+        scopeLabel={financeScopeLabel}
+        defaultResetDate={dateScope === 'range' ? dateFilter : getTodayDate()}
+        groupBy={financeGroupBy}
+        page={financePage}
+        entryStatus={financeEntryStatus}
+        searchTerm={financeSearchInput}
+        exportingCsv={exportingCsv}
+        onGroupByChange={(nextGroupBy) => {
+          setFinanceGroupBy(nextGroupBy);
+          setFinancePage(1);
+        }}
+        onPageChange={(nextPage) => setFinancePage(Math.max(1, nextPage))}
+        onEntryStatusChange={(nextStatus) => {
+          setFinanceEntryStatus(nextStatus);
+          setFinancePage(1);
+        }}
+        onSearchChange={(nextSearch) => setFinanceSearchInput(nextSearch)}
+        onExportCsv={() => void handleExportFinanceCsv()}
+        onOpenPaymentsTab={onNavigateTab ? () => onNavigateTab('pagamentos') : undefined}
+        onRetry={() => setRefreshTick((tick) => tick + 1)}
+        onResetFinance={handleResetFinanceAndReload}
+      />
 
-        <div className="admin-stat-card">
-          <div className="admin-stat-icon" style={{ background: 'linear-gradient(135deg, #3a0a1e, #220610)' }}>
-            <Users style={{ width: 20, height: 20, color: '#d4af37' }} />
-          </div>
-          <div>
-            <p style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--admin-text-muted)' }}>Leads totais</p>
-            <p style={{ fontSize: 24, fontWeight: 800, color: 'var(--admin-accent)', marginTop: 2 }}>{overview.leads.total}</p>
-          </div>
-        </div>
+      <DashboardCalendarAgenda
+        adminKey={adminKey}
+        tenantSlug={tenantSlug}
+        refreshSignal={refreshTick}
+        onOpenAgendaForDate={onOpenAgendaForDate}
+      />
+
+      <div className="dash-bottom-grid">
+        <DashboardLeadsSection
+          stageSummary={stageSummary}
+          totalLeads={overview.leads.total}
+          filteredByPeriod={Boolean(overview.leads.filteredByPeriod)}
+          loading={overviewLoading}
+          hasLoadedOnce={overviewHasLoadedOnce}
+          error={overviewError}
+          onRetry={onReloadOverview}
+        />
+
+        <DashboardOperationsSection
+          overview={overview}
+          dateScope={dateScope}
+          supabaseStatus={supabaseStatus}
+          supabaseLoading={supabaseLoading}
+          onNavigateTab={onNavigateTab}
+        />
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
-        <div className="admin-analytics-card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>{financeTitle}</h3>
-            {hasFinanceData && (
-              <button
-                onClick={() => {
-                  setShowResetModal(true);
-                  setResetPassword('');
-                  setResetError('');
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: '4px 10px',
-                  borderRadius: 8,
-                  border: '1px solid rgba(239,68,68,0.3)',
-                  background: 'rgba(239,68,68,0.08)',
-                  color: '#ef4444',
-                  fontSize: 11,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-              >
-                <Trash2 style={{ width: 12, height: 12 }} /> Zerar
-              </button>
-            )}
-          </div>
-          <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(100px, 1fr))', gap: 12 }}>
-            <div>
-              <p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Previsto</p>
-              <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', marginTop: 2 }}>R$ {overview.finance.expected.toFixed(2)}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Recebido</p>
-              <p style={{ fontSize: 16, fontWeight: 700, color: '#059669', marginTop: 2 }}>R$ {overview.finance.received.toFixed(2)}</p>
-            </div>
-            <div>
-              <p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>Pendente</p>
-              <p style={{ fontSize: 16, fontWeight: 700, color: '#d97706', marginTop: 2 }}>R$ {overview.finance.pending.toFixed(2)}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="admin-analytics-card">
-          <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>Leads por etapa</h3>
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {stageSummary.length === 0 ? (
-              <p style={{ fontSize: 12, color: 'var(--admin-text-muted)' }}>Sem leads cadastrados.</p>
-            ) : (
-              stageSummary.map(([stage, count]) => (
-                <div key={stage} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
-                  <span style={{ textTransform: 'capitalize', color: 'var(--admin-text)' }}>{stage}</span>
-                  <span style={{ fontWeight: 700, color: 'var(--admin-accent)', background: 'var(--admin-accent-glow)', padding: '2px 10px', borderRadius: 12, fontSize: 12 }}>{count as string}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="admin-analytics-card">
-        <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>{bookingsTitle}</h3>
-        {bookingsLoading ? (
-          <p style={{ marginTop: 10, fontSize: 13, color: 'var(--admin-text-muted)' }}>Carregando agenda...</p>
-        ) : dashboardBookings.length === 0 ? (
-          <p style={{ marginTop: 10, fontSize: 13, color: 'var(--admin-text-muted)' }}>Sem agendamentos para este filtro.</p>
-        ) : (
-          <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {dashboardBookings.map((booking) => (
-              <div key={booking.id} className="admin-booking-card" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <div className="admin-avatar">{booking.name.charAt(0).toUpperCase()}</div>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)' }}>{booking.name}</p>
-                    <p style={{ fontSize: 11, color: 'var(--admin-text-muted)' }}>
-                      {booking.service} • {dateScope === 'all' ? `${formatDateBR(booking.date)} • ${booking.time}` : booking.time}
-                    </p>
-                  </div>
-                </div>
-                <span
-                  style={{
-                    padding: '3px 10px',
-                    borderRadius: 12,
-                    fontSize: 11,
-                    fontWeight: 700,
-                    background:
-                      booking.status === 'confirmed'
-                        ? 'rgba(52,211,153,0.1)'
-                        : booking.status === 'rejected'
-                          ? 'rgba(251,113,133,0.1)'
-                          : 'rgba(251,191,36,0.1)',
-                    color: booking.status === 'confirmed' ? '#059669' : booking.status === 'rejected' ? '#e11d48' : '#d97706',
-                    border: `1px solid ${
-                      booking.status === 'confirmed'
-                        ? 'rgba(52,211,153,0.2)'
-                        : booking.status === 'rejected'
-                          ? 'rgba(251,113,133,0.2)'
-                          : 'rgba(251,191,36,0.2)'
-                    }`,
-                  }}
-                >
-                  {booking.status === 'confirmed' ? 'Confirmado' : booking.status === 'rejected' ? 'Rejeitado' : 'Pendente'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {overviewLoading && <p style={{ marginTop: 12, fontSize: 13, color: 'var(--admin-text-muted)' }}>Atualizando dashboard...</p>}
-
-      {showResetModal && (
-        <div className="admin-modal-root admin-modal-root-critical" onClick={() => setShowResetModal(false)}>
-          <div className="admin-modal-overlay" />
-          <div
-            className="admin-modal-card admin-modal-card-sm"
-            role="dialog"
-            aria-modal="true"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="admin-modal-header">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 10,
-                    background: 'rgba(239,68,68,0.1)',
-                    border: '1px solid rgba(239,68,68,0.2)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Lock style={{ width: 18, height: 18, color: '#ef4444' }} />
-                </div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--admin-text)', margin: 0 }}>Zerar financeiro</h3>
-              </div>
-              <button onClick={() => setShowResetModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--admin-text-muted)' }}>
-                <X style={{ width: 18, height: 18 }} />
-              </button>
-            </div>
-
-            <div className="admin-modal-body">
-              <p className="admin-modal-help">Esta acao vai remover as entradas financeiras. Digite a senha de administrador para confirmar.</p>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Escopo</label>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                    <button
-                      onClick={() => setResetScope('day')}
-                      style={{
-                        flex: 1,
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        background: resetScope === 'day' ? 'var(--admin-accent-glow)' : 'var(--admin-bg)',
-                        color: resetScope === 'day' ? 'var(--admin-accent)' : 'var(--admin-text-muted)',
-                        border: `1px solid ${resetScope === 'day' ? 'var(--admin-accent)' : 'var(--admin-border)'}`,
-                      }}
-                    >
-                      Somente {formatDateBR(dateFilter)}
-                    </button>
-                    <button
-                      onClick={() => setResetScope('all')}
-                      style={{
-                        flex: 1,
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        transition: 'all 0.2s',
-                        background: resetScope === 'all' ? 'rgba(239,68,68,0.1)' : 'var(--admin-bg)',
-                        color: resetScope === 'all' ? '#ef4444' : 'var(--admin-text-muted)',
-                        border: `1px solid ${resetScope === 'all' ? 'rgba(239,68,68,0.3)' : 'var(--admin-border)'}`,
-                      }}
-                    >
-                      Todos os dias
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--admin-text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Senha de administrador</label>
-                  <input
-                    type="password"
-                    value={resetPassword}
-                    onChange={(event) => {
-                      setResetPassword(event.target.value);
-                      setResetError('');
-                    }}
-                    onKeyDown={(event) => event.key === 'Enter' && handleResetConfirm()}
-                    placeholder="••••••••"
-                    autoFocus
-                    style={{
-                      width: '100%',
-                      marginTop: 6,
-                      padding: '10px 12px',
-                      borderRadius: 8,
-                      background: 'var(--admin-bg)',
-                      border: `1px solid ${resetError ? 'rgba(239,68,68,0.5)' : 'var(--admin-border)'}`,
-                      color: 'var(--admin-text)',
-                      fontSize: 14,
-                      outline: 'none',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                  {resetError && <p style={{ fontSize: 12, color: '#ef4444', marginTop: 6 }}>{resetError}</p>}
-                </div>
-              </div>
-            </div>
-
-            <div className="admin-modal-footer admin-modal-footer-split">
-              <button
-                onClick={() => setShowResetModal(false)}
-                style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  borderRadius: 8,
-                  background: 'var(--admin-bg)',
-                  border: '1px solid var(--admin-border)',
-                  color: 'var(--admin-text)',
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={handleResetConfirm}
-                disabled={resetLoading || !resetPassword.trim()}
-                style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  borderRadius: 8,
-                  background: resetLoading ? 'rgba(239,68,68,0.3)' : '#ef4444',
-                  border: 'none',
-                  color: '#fff',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  cursor: resetLoading ? 'not-allowed' : 'pointer',
-                  opacity: !resetPassword.trim() ? 0.5 : 1,
-                }}
-              >
-                {resetLoading ? 'Zerando...' : 'Confirmar'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

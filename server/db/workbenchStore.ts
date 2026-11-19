@@ -1,5 +1,19 @@
 // Re-export everything from the workbench modules so existing imports remain valid.
-export type { WorkbenchEntity, OverviewData, TenantRecord, TenantRegistryValue } from './workbench/index';
+export type {
+  WorkbenchEntity,
+  OverviewData,
+  TenantRecord,
+  TenantRegistryValue,
+  ClientStatus,
+  ClientTone,
+  ClientFocusFilter,
+  ClientSortMode,
+  ClientInsight,
+  ClientBoardItem,
+  ClientsWorkspaceQuery,
+  ClientsWorkspaceColumnSlice,
+  ClientsWorkspaceResponse,
+} from './workbench/index';
 export {
   ENTITY_CONFIG,
   TENANT_REGISTRY_KEY,

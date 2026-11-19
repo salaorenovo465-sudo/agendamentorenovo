@@ -334,7 +334,7 @@ const buildDiagnostics = async (
 ): Promise<EvolutionIntegrationDiagnostics> => {
   const checkedAt = new Date().toISOString();
   const targetTenant = normalizeTenantSlug(tenantSlug);
-  const storedSettings = await workbenchStore.getSettings(targetTenant);
+  const storedSettings = await workbenchStore.getSettings(targetTenant).catch(() => ({} as Record<string, unknown>));
   const effectiveSettings = settingsOverride
     ? { ...storedSettings, ...settingsOverride }
     : storedSettings;
@@ -551,7 +551,7 @@ const resolveEffectiveEvolutionConfig = async (
   settingsOverride?: Record<string, unknown>,
 ) => {
   const targetTenant = normalizeTenantSlug(tenantSlug);
-  const current = await workbenchStore.getSettings(targetTenant);
+  const current = await workbenchStore.getSettings(targetTenant).catch(() => ({} as Record<string, unknown>));
   const merged = settingsOverride ? { ...current, ...settingsOverride } : current;
   const resolved = resolveTenantBridgeConfig(targetTenant, merged, 'evolution');
 
@@ -663,6 +663,81 @@ export const sendEvolutionMessageToCustomer = async (
   }
 
   throw new Error(attemptedErrors[attemptedErrors.length - 1] || 'Falha no envio pela Evolution.');
+};
+
+export type EvolutionAttachmentInput = {
+  dataBase64: string;
+  mimeType: string;
+  fileName: string;
+  caption?: string;
+};
+
+export const sendEvolutionAttachmentToCustomer = async (
+  tenantSlug: string | undefined,
+  phone: string,
+  attachment: EvolutionAttachmentInput,
+  settingsOverride?: Record<string, unknown>,
+): Promise<string | null> => {
+  const { config } = await resolveEffectiveEvolutionConfig(tenantSlug, settingsOverride);
+
+  const normalizedPhone = normalizeWhatsappPhone(phone);
+  if (!normalizedPhone) {
+    throw new Error('Telefone invalido para envio de anexo pela Evolution.');
+  }
+
+  const rawBase64 = (attachment.dataBase64 || '').trim();
+  if (!rawBase64) {
+    throw new Error('Conteudo do anexo vazio.');
+  }
+
+  const commaIndex = rawBase64.indexOf(',');
+  const cleanBase64 = commaIndex >= 0 ? rawBase64.slice(commaIndex + 1).trim() : rawBase64;
+  const mimeType = (attachment.mimeType || 'application/octet-stream').trim().toLowerCase();
+  const fileName = (attachment.fileName || `anexo-${Date.now()}`).trim();
+  const caption = (attachment.caption || '').trim();
+
+  const mediaType = mimeType.startsWith('image/')
+    ? 'image'
+    : mimeType.startsWith('video/')
+      ? 'video'
+      : mimeType.startsWith('audio/')
+        ? 'audio'
+        : 'document';
+
+  const sendUrl = buildEvolutionSendUrl(config.evolutionUrl, config.evolutionInstance, '/message/sendMedia/{instance}');
+  const response = await withTimeout(async (signal) =>
+    fetch(sendUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: config.evolutionApiKey,
+        Authorization: `Bearer ${config.evolutionApiKey}`,
+      },
+      body: JSON.stringify({
+        number: normalizedPhone,
+        mediatype: mediaType,
+        mimetype: mimeType,
+        caption,
+        media: cleanBase64,
+        fileName,
+      }),
+      signal,
+    }),
+  );
+
+  const rawBody = await response.text();
+  if (!response.ok) {
+    throw new Error(`Falha no envio de anexo via Evolution (${response.status}): ${rawBody || 'sem detalhes'}`);
+  }
+
+  let payload: unknown = rawBody;
+  try {
+    payload = rawBody ? (JSON.parse(rawBody) as unknown) : {};
+  } catch {
+    payload = rawBody;
+  }
+
+  return extractProviderMessageId(payload);
 };
 
 export const sendEvolutionTestMessage = async (

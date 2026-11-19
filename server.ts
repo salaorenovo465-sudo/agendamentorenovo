@@ -1,6 +1,14 @@
 import express from 'express';
 import cors, { type CorsOptions } from 'cors';
 
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process Error] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[Process Error] Uncaught Exception:', err);
+});
+
 import './server/loadEnv';
 import { adminAuth } from './server/middleware/adminAuth';
 import { adminRoutes } from './server/routes/adminRoutes';
@@ -12,7 +20,11 @@ import { startClientAgentScheduler } from './server/services/clientAgentService'
 import { initializeWhatsapp } from './server/services/whatsappService';
 
 const app = express();
-app.set('trust proxy', true);
+const trustProxyRaw = process.env.TRUST_PROXY?.trim();
+const trustProxyValue = trustProxyRaw
+  ? (trustProxyRaw === 'true' ? 1 : trustProxyRaw === 'false' ? false : /^\d+$/.test(trustProxyRaw) ? Number(trustProxyRaw) : trustProxyRaw)
+  : (process.env.NODE_ENV === 'production' || Boolean(process.env.RENDER) ? 1 : false);
+app.set('trust proxy', trustProxyValue);
 const port = Number(process.env.PORT || 3001);
 
 const DEFAULT_ALLOWED_ORIGINS = ['http://localhost:3000', 'http://127.0.0.1:3000'];
@@ -67,8 +79,8 @@ const corsOptions: CorsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 app.get('/health', (_req, res) => {
   res.json({ ok: true, service: 'agendamentorenovo-api' });
@@ -80,8 +92,20 @@ app.use('/api/admin', adminAuth, adminRoutes);
 app.use('/api/admin/workbench', adminAuth, adminWorkbenchRoutes);
 app.use('/api/whatsapp', adminAuth, whatsappRoutes);
 
+app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  const message = err instanceof Error ? err.message : String(err || '');
+  console.error('[Express Error Handler]', message);
+
+  if (message.includes('Origin nao permitida por CORS')) {
+    res.status(403).json({ error: 'Acesso bloqueado pela política de CORS.' });
+    return;
+  }
+
+  res.status(500).json({ error: 'Erro interno no processamento da requisição.' });
+});
+
 void initializeWhatsapp().catch((error) => {
-  console.error('Falha ao inicializar WhatsApp (Baileys):', error);
+  console.error('Falha ao sincronizar status inicial do WhatsApp (Evolution API):', error);
 });
 
 startClientAgentScheduler();

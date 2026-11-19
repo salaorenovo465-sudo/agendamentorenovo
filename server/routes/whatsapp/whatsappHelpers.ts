@@ -177,14 +177,10 @@ export const enrichThread = async (
 export const sendTextMessage = async (
   threadId: number,
   content: string,
+  tenantSlug?: string,
 ): Promise<Awaited<ReturnType<typeof inboxStore.addMessage>>> => {
   if (!whatsappConfig.isConfigured) {
-    throw new Error('WhatsApp (Baileys) nao configurado.');
-  }
-
-  const status = getWhatsappStatus();
-  if (!status.connected) {
-    throw new Error(`WhatsApp desconectado (${status.connectionState}).`);
+    throw new Error('Integracao WhatsApp (Evolution API) nao configurada.');
   }
 
   const thread = await inboxStore.findThreadById(threadId);
@@ -192,7 +188,7 @@ export const sendTextMessage = async (
     throw new Error('Conversa nao encontrada.');
   }
 
-  const providerMessageId = await sendWhatsappMessageToCustomer(thread.phone, content);
+  const providerMessageId = await sendWhatsappMessageToCustomer(thread.phone, content, tenantSlug);
   return inboxStore.addMessage({
     threadId,
     direction: 'outgoing',

@@ -26,9 +26,80 @@ export type BookingRecord = {
   updatedAt: string;
   confirmedAt: string | null;
   rejectedAt: string | null;
+  completedAt?: string | null;
+};
+
+export type BookingBoardCounts = {
+  total: number;
+  pending: number;
+  confirmed: number;
+  completed: number;
+  rejected: number;
+  assigned: number;
+};
+
+export type BookingBoardResult = {
+  bookings: BookingRecord[];
+  counts: BookingBoardCounts;
+  completedLimit: number;
+  completedTotal: number;
+  hasMoreCompleted: boolean;
+};
+
+export type CompletedBookingsQueryInput = {
+  tenantSlug?: string | null;
+  search?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  professionalId?: number | 'unassigned' | null;
+  page?: number;
+  limit?: number;
+  cursor?: string | null;
+};
+
+export type CompletedBookingsPageResult = {
+  items: BookingRecord[];
+  total: number;
+  overallCompletedTotal: number;
+  page: number;
+  limit: number;
+  hasMore: boolean;
+  nextCursor: string | null;
+};
+
+export type UnifiedHistoryStatusFilter = 'all' | 'pending' | 'overdue' | 'confirmed' | 'completed';
+
+export type UnifiedHistoryStatusCounts = {
+  all: number;
+  pending: number;
+  overdue: number;
+  confirmed: number;
+  completed: number;
+};
+
+export type UnifiedHistoryQueryInput = {
+  tenantSlug?: string | null;
+  statusFilter?: UnifiedHistoryStatusFilter;
+  search?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  professionalId?: number | 'unassigned' | null;
+  page?: number;
+  limit?: number;
+};
+
+export type UnifiedHistoryPageResult = {
+  items: BookingRecord[];
+  total: number;
+  overallTotal: number;
+  statusCounts: UnifiedHistoryStatusCounts;
+  page: number;
+  limit: number;
+  hasMore: boolean;
 };
 
 export type CreateBookingInput = {
+  tenantSlug?: string | null;
   service: string;
   servicePrice: string | null;
   serviceItems?: BookingServiceItem[];
@@ -62,4 +133,27 @@ export type UpdateBookingProfessionalInput = {
 export type UpdateBookingWhatsappThreadInput = {
   id: number;
   whatsappThreadId: number | null;
+};
+
+export type CalendarDayCounts = {
+  total: number;
+  pending: number;
+  confirmed: number;
+  completed: number;
+  rejected: number;
+};
+
+export type CalendarBookingsQueryInput = {
+  startDate: string;
+  endDate: string;
+  tenantSlug?: string | null;
+};
+
+export type CalendarBookingsResult = {
+  startDate: string;
+  endDate: string;
+  tenantSlug: string | null;
+  total: number;
+  countsByDate: Record<string, CalendarDayCounts>;
+  bookings: BookingRecord[];
 };

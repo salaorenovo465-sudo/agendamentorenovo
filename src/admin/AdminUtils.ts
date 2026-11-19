@@ -3,6 +3,7 @@ import type { WorkbenchEntity, WorkbenchOverview } from './types';
 export type TabId =
   | 'dashboard'
   | 'agenda'
+  | 'historico'
   | 'disponibilidade'
   | 'clientes'
   | 'servicos'
@@ -23,6 +24,21 @@ export type FieldConfig = {
   required?: boolean;
 };
 
+const BRL_CURRENCY_FORMATTER = new Intl.NumberFormat('pt-BR', {
+  style: 'currency',
+  currency: 'BRL',
+});
+
+const MONTH_NAMES_PT = [
+  'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+  'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro',
+];
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+export const formatCurrencyBRL = (value: number): string =>
+  BRL_CURRENCY_FORMATTER.format(Number.isFinite(value) ? value : 0);
+
 export const getTodayDate = (): string => {
   const now = new Date();
   const y = now.getFullYear();
@@ -31,10 +47,96 @@ export const getTodayDate = (): string => {
   return `${y}-${m}-${d}`;
 };
 
+export const isLeapYearLocal = (year: number): boolean =>
+  (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+
+export const getDaysInMonthLocal = (year: number, month1Based: number): number => {
+  if (month1Based === 2) return isLeapYearLocal(year) ? 29 : 28;
+  if ([4, 6, 9, 11].includes(month1Based)) return 30;
+  return 31;
+};
+
+export const parseIsoDateLocal = (value: string | null | undefined): { year: number; month: number; day: number } | null => {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().slice(0, 10);
+  if (!ISO_DATE_RE.test(trimmed)) return null;
+  const [y, m, d] = trimmed.split('-').map(Number);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) || m < 1 || m > 12) {
+    return null;
+  }
+  if (d < 1 || d > getDaysInMonthLocal(y, m)) {
+    return null;
+  }
+  return { year: y, month: m, day: d };
+};
+
+export const isValidIsoDateLocal = (value: string | null | undefined): boolean =>
+  parseIsoDateLocal(value) !== null;
+
+export const formatIsoDateLocal = (year: number, month: number, day: number): string =>
+  `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+
+export const shiftIsoDays = (isoDate: string, deltaDays: number): string => {
+  const parts = parseIsoDateLocal(isoDate);
+  if (!parts) return isoDate;
+  const dt = new Date(parts.year, parts.month - 1, parts.day + deltaDays);
+  return formatIsoDateLocal(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+};
+
+export const getMonthRangeFromDate = (isoDate: string): { year: number; month: number; startDate: string; endDate: string; monthKey: string } => {
+  const parts = parseIsoDateLocal(isoDate) || parseIsoDateLocal(getTodayDate())!;
+  const days = getDaysInMonthLocal(parts.year, parts.month);
+  return {
+    year: parts.year,
+    month: parts.month,
+    monthKey: `${String(parts.year).padStart(4, '0')}-${String(parts.month).padStart(2, '0')}`,
+    startDate: formatIsoDateLocal(parts.year, parts.month, 1),
+    endDate: formatIsoDateLocal(parts.year, parts.month, days),
+  };
+};
+
+export const getPreviousMonthRangeFromDate = (isoDate: string): { startDate: string; endDate: string } => {
+  const parts = parseIsoDateLocal(isoDate) || parseIsoDateLocal(getTodayDate())!;
+  const prevMonth = parts.month === 1 ? 12 : parts.month - 1;
+  const prevYear = parts.month === 1 ? parts.year - 1 : parts.year;
+  const days = getDaysInMonthLocal(prevYear, prevMonth);
+  return {
+    startDate: formatIsoDateLocal(prevYear, prevMonth, 1),
+    endDate: formatIsoDateLocal(prevYear, prevMonth, days),
+  };
+};
+
+export const shiftYearMonth = (year: number, month1Based: number, deltaMonths: number): { year: number; month: number; monthKey: string } => {
+  const total = year * 12 + (month1Based - 1) + deltaMonths;
+  const nextYear = Math.floor(total / 12);
+  const nextMonth = ((total % 12) + 12) % 12 + 1;
+  return {
+    year: nextYear,
+    month: nextMonth,
+    monthKey: `${String(nextYear).padStart(4, '0')}-${String(nextMonth).padStart(2, '0')}`,
+  };
+};
+
+export const formatMonthYearPT = (year: number, month1Based: number): string =>
+  `${MONTH_NAMES_PT[month1Based - 1] || String(month1Based)} de ${year}`;
+
 export const formatDateBR = (date: string): string => {
-  const parts = date.split('-');
+  const parts = date.slice(0, 10).split('-');
   if (parts.length !== 3) return date;
   return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
+
+export const formatDateTimeBR = (isoTimestamp: string | null | undefined): string => {
+  if (!isoTimestamp) return '--';
+  const dt = new Date(isoTimestamp);
+  if (Number.isNaN(dt.getTime())) return formatDateBR(isoTimestamp);
+  return dt.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 };
 
 export const toNumber = (value: unknown): number => {
@@ -86,13 +188,13 @@ export const formatBrazilWhatsappInput = (value: string): string => {
 
 export const defaultOverview: WorkbenchOverview = {
   date: getTodayDate(),
-  bookingStats: { total: 0, pending: 0, confirmed: 0, rejected: 0 },
-  leads: { total: 0, byStage: {} },
-  tasks: { total: 0, pending: 0, done: 0 },
-  finance: { expected: 0, received: 0, pending: 0 },
+  bookingStats: { total: 0, pending: 0, confirmed: 0, completed: 0, rejected: 0 },
+  leads: { total: 0, byStage: {}, filteredByPeriod: false },
+  tasks: { total: 0, pending: 0, done: 0, filteredByPeriod: false },
+  finance: { expected: 0, received: 0, pending: 0, totalCount: 0, paidCount: 0, pendingCount: 0, temporalBasis: 'due_date' },
 };
 
-export const DEFAULT_TENANT_SLUG = (import.meta.env.VITE_DEFAULT_TENANT || 'renovo').toLowerCase();
+export const DEFAULT_TENANT_SLUG = (import.meta.env?.VITE_DEFAULT_TENANT || 'renovo').toLowerCase();
 
 export const normalizeTenantSlug = (value: string): string => {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');

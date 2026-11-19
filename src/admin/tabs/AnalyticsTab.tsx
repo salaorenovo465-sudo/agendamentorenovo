@@ -11,6 +11,7 @@ import {
   type ServiceCatalogCategory,
 } from '../collaboratorUtils';
 import { DangerConfirmModal } from '../AdminHelpers';
+import { MoneyEyeButton, useMoneyPrivacy } from '../MoneyPrivacyContext';
 
 type CollaboratorAnalyticsModalProps = {
   collaborator: ReturnType<typeof createCollaboratorDraft>;
@@ -30,6 +31,7 @@ function CollaboratorAnalyticsModal({
   dateLabel,
   onClose,
 }: CollaboratorAnalyticsModalProps) {
+  const { maskCurrency } = useMoneyPrivacy();
   const breakdown = useMemo(() => {
     const merged = new Map<string, {
       serviceName: string;
@@ -82,7 +84,7 @@ function CollaboratorAnalyticsModal({
         <div className="admin-modal-header">
           <div className="admin-modal-title-row">
             <div className="admin-modal-icon admin-modal-icon-gold">
-              <UserRound style={{ width: 18, height: 18, color: 'var(--admin-gold, #d4af37)' }} />
+              <UserRound style={{ width: 18, height: 18, color: 'var(--admin-accent, #3a0a1e)' }} />
             </div>
             <div>
               <h3 className="admin-modal-title">{collaborator.name}</h3>
@@ -106,11 +108,11 @@ function CollaboratorAnalyticsModal({
             </div>
             <div className="collaborator-summary-card">
               <span>Comissao geral</span>
-              <strong>{formatMoney(overall.commissionTotal)}</strong>
+              <strong>{maskCurrency(overall.commissionTotal)}</strong>
             </div>
             <div className="collaborator-summary-card">
               <span>Comissao em {dateLabel.toLowerCase()}</span>
-              <strong>{formatMoney(period.commissionTotal)}</strong>
+              <strong>{maskCurrency(period.commissionTotal)}</strong>
             </div>
           </div>
 
@@ -127,8 +129,8 @@ function CollaboratorAnalyticsModal({
                   <span>{row.category || 'Sem categoria'} | {row.commissionPercent}%</span>
                 </div>
                 <div className="analytics-service-values">
-                  <span>Geral: {row.overallQty} | {formatMoney(row.overallCommission)}</span>
-                  <span>Filtro: {row.periodQty} | {formatMoney(row.periodCommission)}</span>
+                  <span>Geral: {row.overallQty} | {maskCurrency(row.overallCommission)}</span>
+                  <span>Filtro: {row.periodQty} | {maskCurrency(row.periodCommission)}</span>
                 </div>
               </div>
             ))}
@@ -151,6 +153,12 @@ export function AnalyticsTab({
   serviceCatalog,
   analyticsSubTab,
   setAnalyticsSubTab,
+  dateScope = 'all',
+  onDateScopeChange,
+  dateFilter = '',
+  onDateFilterChange,
+  dateFilterEnd = '',
+  onDateFilterEndChange,
   dateLabel,
   onClearHistory,
 }: {
@@ -160,9 +168,16 @@ export function AnalyticsTab({
   serviceCatalog: ServiceCatalogCategory[];
   analyticsSubTab: 'geral' | 'colaboradores';
   setAnalyticsSubTab: (tab: 'geral' | 'colaboradores') => void;
+  dateScope?: 'all' | 'range';
+  onDateScopeChange?: (scope: 'all' | 'range') => void;
+  dateFilter?: string;
+  onDateFilterChange?: (date: string) => void;
+  dateFilterEnd?: string;
+  onDateFilterEndChange?: (date: string) => void;
   dateLabel: string;
   onClearHistory: (masterPassword?: string) => Promise<void>;
 }) {
+  const { maskCurrency } = useMoneyPrivacy();
   const [selectedCollaboratorId, setSelectedCollaboratorId] = useState<number | null>(null);
   const [clearingHistory, setClearingHistory] = useState(false);
   const [clearHistoryModalOpen, setClearHistoryModalOpen] = useState(false);
@@ -197,22 +212,96 @@ export function AnalyticsTab({
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button onClick={() => setAnalyticsSubTab('geral')} className={analyticsSubTab === 'geral' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Visao Geral</button>
-          <button onClick={() => setAnalyticsSubTab('colaboradores')} className={analyticsSubTab === 'colaboradores' ? 'admin-btn-primary' : 'admin-btn-outline'} style={{ padding: '6px 16px', fontSize: 12 }}>Por Colaborador</button>
+    <div className="space-y-4">
+      <section className="agenda-command-center">
+        <div className="agenda-command-top">
+          <div className="agenda-command-copy">
+            <h2>Analytics e Produtividade - {dateLabel}</h2>
+            <p>Acompanhe métricas de receita, conversão, ocupação e comissões individuais por colaborador.</p>
+          </div>
+          <div className="agenda-command-actions">
+            <MoneyEyeButton variant="compact" />
+            <div className="agenda-scope-toggle" role="tablist" aria-label="Visão do Analytics">
+              <button
+                type="button"
+                onClick={() => setAnalyticsSubTab('geral')}
+                className={analyticsSubTab === 'geral' ? 'active' : ''}
+              >
+                Visão Geral
+              </button>
+              <button
+                type="button"
+                onClick={() => setAnalyticsSubTab('colaboradores')}
+                className={analyticsSubTab === 'colaboradores' ? 'active' : ''}
+              >
+                Por Colaborador
+              </button>
+            </div>
+            <button
+              onClick={() => setClearHistoryModalOpen(true)}
+              className="admin-btn-danger agenda-header-btn"
+              disabled={clearingHistory}
+            >
+              {clearingHistory ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Trash2 style={{ width: 13, height: 13 }} />}
+              Limpar histórico total
+            </button>
+          </div>
         </div>
-        <button
-          onClick={() => setClearHistoryModalOpen(true)}
-          className="admin-btn-danger"
-          style={{ padding: '6px 16px', fontSize: 12 }}
-          disabled={clearingHistory}
-        >
-          {clearingHistory ? <Loader2 style={{ width: 13, height: 13 }} className="animate-spin" /> : <Trash2 style={{ width: 13, height: 13 }} />}
-          Limpar historico total
-        </button>
-      </div>
+
+        <div className="agenda-command-bottom">
+          <div className="agenda-toolbar-left">
+            <div className="agenda-stat-grid">
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Registros no filtro</span>
+                <strong>{bookings.length}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-green">
+                <span>Colaboradores</span>
+                <strong>{collaborators.length}</strong>
+              </div>
+            </div>
+          </div>
+
+          {onDateScopeChange && (
+            <div className="agenda-toolbar-scope">
+              <div className="agenda-scope-toggle" role="group" aria-label="Filtro de período do analytics">
+                <button
+                  type="button"
+                  onClick={() => onDateScopeChange('all')}
+                  className={dateScope === 'all' ? 'active' : ''}
+                >
+                  Geral
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onDateScopeChange('range')}
+                  className={dateScope === 'range' ? 'active' : ''}
+                >
+                  Período
+                </button>
+              </div>
+              {dateScope === 'range' && onDateFilterChange && onDateFilterEndChange && (
+                <div className="agenda-scope-dates">
+                  <span>De</span>
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={(e) => onDateFilterChange(e.target.value)}
+                    className="admin-input-sm"
+                  />
+                  <span>Até</span>
+                  <input
+                    type="date"
+                    value={dateFilterEnd || dateFilter}
+                    onChange={(e) => onDateFilterEndChange(e.target.value)}
+                    className="admin-input-sm"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </section>
       {analyticsSubTab === 'geral' ? (
         <div className="space-y-4">
           <AnalyticsPanel bookings={bookings} />
@@ -255,12 +344,12 @@ export function AnalyticsTab({
                 </div>
                 <div>
                   <span>Comissao filtro</span>
-                  <strong>{formatMoney(period.commissionTotal)}</strong>
+                  <strong>{maskCurrency(period.commissionTotal)}</strong>
                 </div>
               </div>
 
               <div className="collaborator-meta-list">
-                <span><Percent style={{ width: 12, height: 12 }} /> Comissao geral: {formatMoney(overall.commissionTotal)}</span>
+                <span><Percent style={{ width: 12, height: 12 }} /> Comissao geral: {maskCurrency(overall.commissionTotal)}</span>
                 <span><BarChart3 style={{ width: 12, height: 12 }} /> Clique para abrir o painel detalhado</span>
               </div>
             </button>

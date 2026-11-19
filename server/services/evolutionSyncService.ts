@@ -245,7 +245,7 @@ export const syncEvolutionWorkspace = async (tenantSlug?: string): Promise<Evolu
   const targetTenant = (tenantSlug || getDefaultTenant()).trim().toLowerCase();
   const issues: string[] = [];
 
-  const settings = await workbenchStore.getSettings(targetTenant);
+  const settings = await workbenchStore.getSettings(targetTenant).catch(() => ({} as Record<string, unknown>));
   const resolved = resolveTenantBridgeConfig(targetTenant, settings, 'evolution');
   if (resolved.ok === false) {
     return {

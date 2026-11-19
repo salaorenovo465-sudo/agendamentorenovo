@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Plus } from 'lucide-react';
+import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import { DangerConfirmModal } from '../AdminHelpers';
 import { toNumber, toStringValue, ENTITY_FIELDS } from '../AdminUtils';
 import { CrudTab } from '../CrudTab';
@@ -24,7 +24,7 @@ export function DisponibilidadeTab({
   const folgas = rules.filter((r) => toStringValue(r.type) === 'folga');
   const horarios = rules.filter((r) => toStringValue(r.type) === 'horario' || toStringValue(r.type) === 'pausa');
   const bloqueios = rules.filter((r) => toStringValue(r.type) === 'feriado' || toStringValue(r.type) === 'bloqueio');
-  const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
+  const weekdays = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
 
   const handleConfirmDelete = async (masterPassword?: string) => {
     const id = deleteTarget ? toNumber(deleteTarget.id) : 0;
@@ -40,56 +40,176 @@ export function DisponibilidadeTab({
   };
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-        <h3 style={{ fontSize: 17, fontWeight: 800, color: 'var(--admin-accent)', margin: 0, letterSpacing: '0.02em' }}>Disponibilidade</h3>
-        <button onClick={() => setShowNewRule(true)} className="admin-btn-primary" style={{ padding: '8px 16px', fontSize: 12, display: 'flex', alignItems: 'center', gap: 6 }}><Plus style={{ width: 14, height: 14 }} /> Nova Regra</button>
-      </div>
+    <div className="space-y-4">
+      <section className="agenda-command-center">
+        <div className="agenda-command-top">
+          <div className="agenda-command-copy">
+            <h2>Regras de Disponibilidade</h2>
+            <p>Configure janelas de atendimento, pausas, folgas semanais e bloqueios de agenda.</p>
+          </div>
+          <div className="agenda-command-actions">
+            <button onClick={() => setShowNewRule(true)} className="admin-btn-primary agenda-new-booking-btn">
+              <Plus style={{ width: 15, height: 15 }} /> Nova regra
+            </button>
+          </div>
+        </div>
+
+        <div className="agenda-command-bottom">
+          <div className="agenda-toolbar-left">
+            <div className="agenda-stat-grid">
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Total de regras</span>
+                <strong>{rules.length}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-green">
+                <span>Horários / Pausas</span>
+                <strong>{horarios.length}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-gold">
+                <span>Folgas</span>
+                <strong>{folgas.length}</strong>
+              </div>
+              <div className="agenda-stat-card agenda-stat-wine">
+                <span>Bloqueios</span>
+                <strong>{bloqueios.length}</strong>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {showNewRule && (
-        <div className="admin-analytics-card" style={{ marginBottom: 16 }}>
-          <CrudTab title="Regra" fields={ENTITY_FIELDS.availability} rows={[]} loading={false} onCreate={async (p) => { await onCreateEntity('availability', p); setShowNewRule(false); }} onUpdate={async () => {}} onDelete={async () => {}} />
+        <div className="admin-modal-root" onClick={() => setShowNewRule(false)}>
+          <div className="admin-modal-overlay" />
+          <div
+            className="admin-modal-card admin-modal-card-md"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="admin-modal-header">
+              <div>
+                <h3 className="admin-modal-title">Nova regra de disponibilidade</h3>
+                <p className="admin-modal-subtitle">Defina o tipo de regra, dia da semana, faixa de horário e limite diário.</p>
+              </div>
+              <button onClick={() => setShowNewRule(false)} className="admin-btn-outline" style={{ padding: 6 }}>
+                <X style={{ width: 16, height: 16 }} />
+              </button>
+            </div>
+            <div className="admin-modal-body">
+              <CrudTab
+                title="Regra"
+                fields={ENTITY_FIELDS.availability}
+                rows={[]}
+                loading={false}
+                hideRecordsList
+                onCreate={async (p) => {
+                  await onCreateEntity('availability', p);
+                  setShowNewRule(false);
+                }}
+                onUpdate={async () => {}}
+                onDelete={async () => {}}
+              />
+            </div>
+          </div>
         </div>
       )}
-      {loading ? <p style={{ fontSize: 13, color: 'var(--admin-text-muted)' }}>Carregando...</p> : (
+
+      {loading ? (
+        <div className="agenda-loading-state">
+          <Loader2 style={{ width: 18, height: 18 }} className="animate-spin" /> Carregando disponibilidade...
+        </div>
+      ) : (
         <div className="admin-pipeline">
-          <div className="admin-pipeline-col admin-pipeline-confirmed">
-            <div className="admin-pipeline-col-header">Horarios <span className="admin-pipeline-count">{horarios.length}</span></div>
-            <div className="admin-pipeline-cards">
-              {horarios.map((r) => (
-                <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-confirmed">
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{weekdays[toNumber(r.weekday)] || ''} • {toStringValue(r.start_time)} - {toStringValue(r.end_time)}</p>
-                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
-                </div>
-              ))}
+          <section className="admin-pipeline-col admin-pipeline-confirmed">
+            <div className="admin-pipeline-col-header">
+              <span>Horários e Pausas</span>
+              <span className="admin-pipeline-count">{horarios.length}</span>
             </div>
-          </div>
-          <div className="admin-pipeline-col admin-pipeline-pending">
-            <div className="admin-pipeline-col-header">Folgas <span className="admin-pipeline-count">{folgas.length}</span></div>
             <div className="admin-pipeline-cards">
-              {folgas.map((r) => (
-                <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-pending">
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{weekdays[toNumber(r.weekday)] || 'Todos'}</p>
-                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
-                </div>
-              ))}
+              {horarios.length === 0 ? (
+                <div className="agenda-empty-column">Nenhuma regra de horário cadastrada.</div>
+              ) : (
+                horarios.map((r) => (
+                  <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-confirmed">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                      <span className="historico-badge historico-badge-confirmed">{toStringValue(r.type) || 'Horário'}</span>
+                    </div>
+                    <p style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
+                    <p style={{ fontSize: 11.5, color: 'var(--admin-text-muted)', margin: '4px 0 0' }}>
+                      {weekdays[toNumber(r.weekday)] || 'Todos os dias'} • {toStringValue(r.start_time)} - {toStringValue(r.end_time)}
+                    </p>
+                    <div style={{ marginTop: 10 }}>
+                      <button onClick={() => setDeleteTarget(r)} className="admin-btn-outline agenda-delete-btn" style={{ fontSize: 11, padding: '4px 9px' }}>
+                        <Trash2 style={{ width: 12, height: 12 }} /> Remover
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-          </div>
-          <div className="admin-pipeline-col admin-pipeline-rejected">
-            <div className="admin-pipeline-col-header">Feriados/Bloqueios <span className="admin-pipeline-count">{bloqueios.length}</span></div>
+          </section>
+
+          <section className="admin-pipeline-col admin-pipeline-pending">
+            <div className="admin-pipeline-col-header">
+              <span>Folgas</span>
+              <span className="admin-pipeline-count">{folgas.length}</span>
+            </div>
             <div className="admin-pipeline-cards">
-              {bloqueios.map((r) => (
-                <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-rejected">
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
-                  <p style={{ fontSize: 11, color: 'var(--admin-text-muted)', margin: '4px 0' }}>{toStringValue(r.type)} • {weekdays[toNumber(r.weekday)] || ''}</p>
-                  <button onClick={() => setDeleteTarget(r)} className="admin-btn-danger" style={{ fontSize: 10, padding: '2px 6px', marginTop: 4 }}>Remover</button>
-                </div>
-              ))}
+              {folgas.length === 0 ? (
+                <div className="agenda-empty-column">Nenhuma folga cadastrada.</div>
+              ) : (
+                folgas.map((r) => (
+                  <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-pending">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                      <span className="historico-badge historico-badge-pending">Folga</span>
+                    </div>
+                    <p style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
+                    <p style={{ fontSize: 11.5, color: 'var(--admin-text-muted)', margin: '4px 0 0' }}>
+                      {weekdays[toNumber(r.weekday)] || 'Todos os dias'}
+                    </p>
+                    <div style={{ marginTop: 10 }}>
+                      <button onClick={() => setDeleteTarget(r)} className="admin-btn-outline agenda-delete-btn" style={{ fontSize: 11, padding: '4px 9px' }}>
+                        <Trash2 style={{ width: 12, height: 12 }} /> Remover
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
-          </div>
+          </section>
+
+          <section className="admin-pipeline-col admin-pipeline-rejected">
+            <div className="admin-pipeline-col-header">
+              <span>Feriados e Bloqueios</span>
+              <span className="admin-pipeline-count">{bloqueios.length}</span>
+            </div>
+            <div className="admin-pipeline-cards">
+              {bloqueios.length === 0 ? (
+                <div className="agenda-empty-column">Nenhum bloqueio cadastrado.</div>
+              ) : (
+                bloqueios.map((r) => (
+                  <div key={toNumber(r.id)} className="admin-pipeline-card admin-pipeline-card-rejected">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 4 }}>
+                      <span className="historico-badge historico-badge-overdue">{toStringValue(r.type) || 'Bloqueio'}</span>
+                    </div>
+                    <p style={{ fontSize: 13.5, fontWeight: 800, color: 'var(--admin-text)', margin: 0 }}>{toStringValue(r.title)}</p>
+                    <p style={{ fontSize: 11.5, color: 'var(--admin-text-muted)', margin: '4px 0 0' }}>
+                      {weekdays[toNumber(r.weekday)] || 'Todos os dias'}
+                    </p>
+                    <div style={{ marginTop: 10 }}>
+                      <button onClick={() => setDeleteTarget(r)} className="admin-btn-outline agenda-delete-btn" style={{ fontSize: 11, padding: '4px 9px' }}>
+                        <Trash2 style={{ width: 12, height: 12 }} /> Remover
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
         </div>
       )}
+
       <DangerConfirmModal
         isOpen={Boolean(deleteTarget)}
         title="Excluir regra de disponibilidade"
